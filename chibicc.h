@@ -5,6 +5,8 @@
 #include <string>
 using namespace std;
 
+namespace yuc {
+
 typedef struct Obj Obj;
 struct Obj {
   Obj *next;
@@ -12,7 +14,10 @@ struct Obj {
 
  };
 
-void ir_gen(Obj &prog, ofstream &out);
+
+}
+
+void ir_gen(const yuc::Obj &prog, ofstream &out);
 
 
 #endif
