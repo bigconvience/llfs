@@ -22,12 +22,12 @@ GlobalVariable *createGlob(Type *type, std::string name) {
     return gVar;
 }
 
-static void emit_data(const yuc::Obj &prog) {
+static void emit_data(const yuc::Obj *prog) {
   GlobalVariable *gVar = createGlob(Builder->getInt32Ty(), "variable");
   gVar->setInitializer(Builder->getInt32(21));
 }
 
-void ir_gen(const yuc::Obj &prog, std::ofstream &out) {
+void ir_gen(const yuc::Obj *prog, std::ofstream &out) {
   InitializeModule();
   emit_data(prog);
 

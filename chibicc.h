@@ -443,7 +443,7 @@ extern bool opt_fcommon;
 extern char *base_file;
 }
 
-void ir_gen(const yuc::Obj &prog, ofstream &out);
+void ir_gen(const yuc::Obj *prog, ofstream &out);
 
 
 #endif
