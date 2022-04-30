@@ -1,7 +1,7 @@
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
-#include "chibicc.h"
+#include "yuc.h"
 
 using namespace llvm;
 
@@ -22,15 +22,16 @@ GlobalVariable *createGlob(Type *type, std::string name) {
     return gVar;
 }
 
-static void emit_data(const yuc::Obj *prog) {
-  GlobalVariable *gVar = createGlob(Builder->getInt32Ty(), "variable");
-  gVar->setInitializer(Builder->getInt32(21));
+static void emit_data(yuc::Ast *ast) {
+  GlobalVariable *gVar = createGlob(Builder->getInt32Ty(), ast->name);
+  gVar->setInitializer(Builder->getInt32(ast->initializer));
 }
 
-void ir_gen(const yuc::Obj *prog, std::ofstream &out) {
+void yuc::ir_gen(yuc::Ast *ast, std::ofstream &out) {
   InitializeModule();
-  emit_data(prog);
+  emit_data(ast);
 
   TheModule->print(errs(), nullptr);
+  out << 'yuc end' << endl;
 }
 

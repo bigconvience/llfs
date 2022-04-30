@@ -1,14 +1,29 @@
 #ifndef CHIBICC_H
 #define CHIBICC_H
 
-#include <fstream>
-#include <string>
-using namespace std;
+#define _POSIX_C_SOURCE 200809L
+#include <assert.h>
+#include <ctype.h>
+#include <errno.h>
+#include <glob.h>
+#include <libgen.h>
+#include <stdarg.h>
+#include <stdbool.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdnoreturn.h>
+#include <string.h>
+#include <strings.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <sys/wait.h>
+#include <time.h>
+#include <unistd.h>
 
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 
-namespace yuc {
 
 typedef struct Type Type;
 typedef struct Node Node;
@@ -441,9 +456,5 @@ extern StringArray include_paths;
 extern bool opt_fpic;
 extern bool opt_fcommon;
 extern char *base_file;
-}
-
-void ir_gen(const yuc::Obj *prog, ofstream &out);
-
 
 #endif
