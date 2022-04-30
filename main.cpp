@@ -8,11 +8,13 @@ void test_createGlobalVar() {
 	prog->is_definition = true;
 	prog->is_static = false;
 	prog->name = "globalVar";
+
 	Type *type = new Type();
 	prog->ty = type;
 	type->size = 4;
-	type->align = 4;
 	type->kind = TY_INT;
+	prog->align = 4;
+	
 	int number = 21;
 	char *init = new char[4];
 	prog->init_data = init;

@@ -7,7 +7,6 @@ using namespace yuc;
 static Ast *global_ast;
 static FILE *output_file;
 
-
 static void println(char *fmt, ...) {
   va_list ap;
   va_start(ap, fmt);
@@ -16,13 +15,17 @@ static void println(char *fmt, ...) {
   fprintf(output_file, "\n");
 }
 
-
 static void emit_data(Obj *prog) {
   cout << "emit_data start" << endl;
+  Ast head;
+  Ast *cur = &head;
   for (Obj *var = prog; var; var = var->next) {
+    cout << "emit_data name: " << var->name << endl;
     if (var->is_function || !var->is_definition)
       continue;
 
+    cur = cur->next = new Ast;
+    cur->name = var->name;
     if (var->is_static)
       println("  .local %s", var->name);
     else
@@ -30,7 +33,7 @@ static void emit_data(Obj *prog) {
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
       ? MAX(16, var->align) : var->align;
-
+    cur->align = align;
     // Common symbol
     if (opt_fcommon && var->is_tentative) {
       println("  .comm %s, %d, %d", var->name, var->ty->size, align);
@@ -73,6 +76,7 @@ static void emit_data(Obj *prog) {
     println("%s:", var->name);
     println("  .zero %d", var->ty->size);
   }
+  global_ast = head.next;
 }
 
 
@@ -81,5 +85,5 @@ void codegen(Obj *prog, FILE *out)
   output_file = out;
   emit_data(prog);
   ofstream out_put("ir_output.out");
-	// ir_gen(global_ast, out_put);
+	ir_gen(global_ast, out_put);
 }

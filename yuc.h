@@ -13,6 +13,7 @@ namespace yuc {
 		string name;
 		int align;
 		int initializer;
+		Ast *next;
 	};
 
 	void ir_gen(Ast *ast, ofstream &out);

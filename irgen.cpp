@@ -1,9 +1,11 @@
+#include "yuc.h"
+
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
-#include "yuc.h"
 
 using namespace llvm;
+using namespace yuc;
 
 static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<Module> TheModule;
@@ -22,16 +24,21 @@ GlobalVariable *createGlob(Type *type, std::string name) {
     return gVar;
 }
 
-static void emit_data(yuc::Ast *ast) {
+static void emit_data(Ast *ast) {
   GlobalVariable *gVar = createGlob(Builder->getInt32Ty(), ast->name);
-  gVar->setInitializer(Builder->getInt32(ast->initializer));
+  gVar->setAlignment(MaybeAlign(ast->align));
+  gVar->setInitializer(Builder->getInt32(21));
 }
 
-void yuc::ir_gen(yuc::Ast *ast, std::ofstream &out) {
+void yuc::ir_gen(Ast *ast, std::ofstream &out) {
+  if (!ast) {
+    std::cerr << "no ast" << std::endl;
+    return;
+  }
   InitializeModule();
   emit_data(ast);
 
   TheModule->print(errs(), nullptr);
-  out << 'yuc end' << endl;
+  out << "yuc end" << std::endl;
 }
 

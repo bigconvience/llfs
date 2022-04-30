@@ -1,6 +1,6 @@
 #!/bin/bash
 
-rm toy.out
+rm *.out
 
-clang++ ir_gen.cpp codegen.cpp llfs.cpp `llvm-config --cxxflags --ldflags --system-libs --libs core` -fno-rtti -o toy.out
+clang++ main.cpp irgen.cpp codegen.cpp  `llvm-config --cxxflags --ldflags --system-libs --libs core` -fno-rtti -o toy.out
 ./toy.out
