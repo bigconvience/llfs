@@ -23,6 +23,7 @@ static void InitializeModule() {
  */ 
 GlobalVariable *createGlobalVar(Type *type, Ast *ast) {
     string name = ast->name;
+    std::cout << "createGlobalVar name:" << name << endl;
     TheModule->getOrInsertGlobal(name, type);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
     gVar->setAlignment(MaybeAlign(ast->align));
@@ -39,7 +40,7 @@ static void emit_data(Ast *ast) {
     if (ast->is_function) {
       continue;      
     }
-    GlobalVariable *gVar = createGlobalVar(Builder->getInt32Ty(), ast);
+    createGlobalVar(Builder->getInt32Ty(), cur);
   }
 }
 

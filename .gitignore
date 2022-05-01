@@ -10,3 +10,4 @@
 /stage2
 *.ll
 *.bc
+*.out

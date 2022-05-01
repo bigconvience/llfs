@@ -1,8 +1,13 @@
 #include "chibicc.h"
+#include "yuc.h"
+
+using namespace std;
+using namespace yuc;
 
 #define GP_MAX 6
 #define FP_MAX 8
 
+static Ast *global_ast;
 static FILE *output_file;
 static int depth;
 static char *argreg8[] = {"%dil", "%sil", "%dl", "%cl", "%r8b", "%r9b"};
@@ -1377,18 +1382,27 @@ static void assign_lvar_offsets(Obj *prog) {
 }
 
 static void emit_data(Obj *prog) {
+  Ast head;
+  Ast *cur = &head;
   for (Obj *var = prog; var; var = var->next) {
     if (var->is_function || !var->is_definition)
       continue;
-
-    if (var->is_static)
+    // cout<< "emit_data name:" << var->name << endl;
+    cur = cur->next = new Ast;
+    cur->name = var->name;
+    if (var->is_static) {
       println("  .local %s", var->name);
-    else
+      cur->linkage_type = InternalLinkage;
+    }
+    else {
       println("  .globl %s", var->name);
+      cur->is_preemptable = false;
+    }
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
       ? MAX(16, var->align) : var->align;
 
+    cur->align = align;
     // Common symbol
     if (opt_fcommon && var->is_tentative) {
       println("  .comm %s, %d, %d", var->name, var->ty->size, align);
@@ -1431,6 +1445,7 @@ static void emit_data(Obj *prog) {
     println("%s:", var->name);
     println("  .zero %d", var->ty->size);
   }
+  global_ast = head.next;
 }
 
 static void store_fp(int r, int offset, int sz) {
@@ -1585,7 +1600,7 @@ static void emit_text(Obj *prog) {
 
 void codegen(Obj *prog, FILE *out) {
   output_file = out;
-
+  output_file = fopen("./test2/asm.out", "w");
   File **files = get_input_files();
   for (int i = 0; files[i]; i++)
     println("  .file %d \"%s\"", files[i]->file_no, files[i]->name);
@@ -1593,4 +1608,7 @@ void codegen(Obj *prog, FILE *out) {
   assign_lvar_offsets(prog);
   emit_data(prog);
   emit_text(prog);
+
+  ofstream out_put("./test2/ir_output.out");
+  ir_gen(global_ast, out_put);
 }
