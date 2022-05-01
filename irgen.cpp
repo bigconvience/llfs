@@ -18,16 +18,29 @@ static void InitializeModule() {
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
 
-GlobalVariable *createGlob(Type *type, std::string name) {
+/**
+ * https://llvm.org/doxygen/classllvm_1_1GlobalVariable.html
+ */ 
+GlobalVariable *createGlobalVar(Type *type, Ast *ast) {
+    string name = ast->name;
     TheModule->getOrInsertGlobal(name, type);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
+    gVar->setAlignment(MaybeAlign(ast->align));
+    if (ast->is_preemptable) {
+      gVar->setDSOLocal(true);
+    }
+    gVar->setInitializer(Builder->getInt32(21));
+    gVar->setLinkage(static_cast<GlobalValue::LinkageTypes>(ast->linkage_type));
     return gVar;
 }
 
 static void emit_data(Ast *ast) {
-  GlobalVariable *gVar = createGlob(Builder->getInt32Ty(), ast->name);
-  gVar->setAlignment(MaybeAlign(ast->align));
-  gVar->setInitializer(Builder->getInt32(21));
+  for (Ast *cur = ast; cur; cur = cur->next) {
+    if (ast->is_function) {
+      continue;      
+    }
+    GlobalVariable *gVar = createGlobalVar(Builder->getInt32Ty(), ast);
+  }
 }
 
 void yuc::ir_gen(Ast *ast, std::ofstream &out) {

@@ -24,6 +24,9 @@
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
 
+#ifndef __GNUC__
+# define __attribute__(x)
+#endif
 
 typedef struct Type Type;
 typedef struct Node Node;
@@ -41,7 +44,7 @@ typedef struct {
   int len;
 } StringArray;
 
-void strarray_push(StringArray *arr, char *s);
+void strarray_push(StringArray *arr, const char *s);
 char *format(char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 //
@@ -91,9 +94,9 @@ struct Token {
   Token *origin;    // If this is expanded from a macro, the original token
 };
 
-void error(char *fmt, ...) __attribute__((format(printf, 1, 2)));
-void error_at(char *loc, char *fmt, ...) __attribute__((format(printf, 2, 3)));
-void error_tok(Token *tok, char *fmt, ...) __attribute__((format(printf, 2, 3)));
+noreturn void error(char *fmt, ...) __attribute__((format(printf, 1, 2)));
+noreturn void error_at(char *loc, char *fmt, ...) __attribute__((format(printf, 2, 3)));
+noreturn void error_tok(Token *tok, char *fmt, ...) __attribute__((format(printf, 2, 3)));
 void warn_tok(Token *tok, char *fmt, ...) __attribute__((format(printf, 2, 3)));
 bool equal(Token *tok, char *op);
 Token *skip(Token *tok, char *op);
@@ -403,7 +406,6 @@ Type *vla_of(Type *base, Node *expr);
 Type *enum_type(void);
 Type *struct_type(void);
 void add_type(Node *node);
-void dump_type(Type *ty);
 
 //
 // codegen.c

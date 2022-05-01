@@ -26,10 +26,14 @@ static void emit_data(Obj *prog) {
 
     cur = cur->next = new Ast;
     cur->name = var->name;
-    if (var->is_static)
+    if (var->is_static) {
       println("  .local %s", var->name);
-    else
+      cur->linkage_type = InternalLinkage;
+    }
+    else {
       println("  .globl %s", var->name);
+      cur->is_preemptable = false;
+    }
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
       ? MAX(16, var->align) : var->align;
