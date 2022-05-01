@@ -1,7 +1,7 @@
 LLVM_FLAGS=$(shell llvm-config --cxxflags --ldflags --system-libs --libs core)
 CFLAGS=-g -fno-common -Wall -Wno-switch -Wno-writable-strings $(LLVM_FLAGS) -fno-rtti
 CC=clang++
-SRCS=$(wildcard *.c *.cpp)
+SRCS=$(wildcard *.cpp)
 OBJS=$(SRCS:.c=.o)
 
 TEST_SRCS=$(wildcard test/*.c)

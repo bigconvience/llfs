@@ -23,7 +23,7 @@ static void InitializeModule() {
  */ 
 GlobalVariable *createGlobalVar(Type *type, Ast *ast) {
     string name = ast->name;
-    std::cout << "createGlobalVar name:" << name << endl;
+    // std::cout << "createGlobalVar name:" << name << endl;
     TheModule->getOrInsertGlobal(name, type);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
     gVar->setAlignment(MaybeAlign(ast->align));
