@@ -1,7 +1,7 @@
 # llfs: Learn LLVM from scratch
 
 ## Purpose
-Build a simple C compiler based on [chibicc cpp version](https://github.com/bigconvience/chibicc_cpp/tree/cpp_version) ast and backend by LLVM. I create this project to learn LLVM.
+Build a simple C compiler based on [chibicc cpp version](https://github.com/bigconvience/chibicc_cpp/) ast and backend by LLVM. I create this project to learn LLVM.
 
 ## LLVM Commands to use
 clang hello.c -o a.out

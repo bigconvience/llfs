@@ -19,6 +19,41 @@ static Obj *current_fn;
 static void gen_expr(Node *node);
 static void gen_stmt(Node *node);
 
+static CType *build_ctype(Obj *obj) {
+  CType *ctype = new CType();
+  Type *ty = obj->ty;
+  ctype->size = ty->size;
+  ctype->is_unsigned = ty->is_unsigned;
+  TypeKind kind = ty->kind;
+  cout << "build ctype: kind " << kind << endl;
+  switch(kind) {
+    case TY_INT:
+      ctype->kind = IntegerType;
+      break;
+    case TY_ARRAY:
+      ctype->kind = ArrayType;
+      break;
+    default:
+      cerr << "unkonw kind: " << kind << endl;
+      break;
+  }
+  return ctype;
+}
+
+static CValue *build_cvalue(Obj *obj) {
+  CValue *cvalue = new CValue();
+  Type *ty = obj->ty;
+  int val;
+  switch(ty->kind) {
+    case TY_INT:
+      val = *(int *)obj->init_data;
+      cvalue->val = val;
+      break;
+  }
+
+  return cvalue;
+}
+
 __attribute__((format(printf, 1, 2)))
 static void println(char *fmt, ...) {
   va_list ap;
@@ -1409,6 +1444,8 @@ static void emit_data(Obj *prog) {
       continue;
     }
 
+    cur->type = build_ctype(var);
+    cur->initializer = build_cvalue(var);
     // .data or .tdata
     if (var->init_data) {
       if (var->is_tls)
@@ -1604,11 +1641,11 @@ void codegen(Obj *prog, FILE *out) {
   File **files = get_input_files();
   for (int i = 0; files[i]; i++)
     println("  .file %d \"%s\"", files[i]->file_no, files[i]->name);
-
+  const string file_name = files[0]->name;
   assign_lvar_offsets(prog);
   emit_data(prog);
   emit_text(prog);
 
   ofstream out_put("./test2/ir_output.out");
-  ir_gen(global_ast, out_put);
+  ir_gen(global_ast, out_put, file_name);
 }
