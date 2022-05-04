@@ -28,10 +28,10 @@ static CType *build_ctype(Obj *obj) {
   cout << "build ctype: kind " << kind << endl;
   switch(kind) {
     case TY_INT:
-      ctype->kind = IntegerType;
+      ctype->kind = CType::IntegerType;
       break;
     case TY_ARRAY:
-      ctype->kind = ArrayType;
+      ctype->kind = CType::ArrayType;
       break;
     default:
       cerr << "unkonw kind: " << kind << endl;
@@ -1427,7 +1427,7 @@ static void emit_data(Obj *prog) {
     cur->name = var->name;
     if (var->is_static) {
       println("  .local %s", var->name);
-      cur->linkage_type = InternalLinkage;
+      cur->linkage_type = Ast::InternalLinkage;
     }
     else {
       println("  .globl %s", var->name);

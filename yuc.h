@@ -4,32 +4,35 @@
 #include <string>
 #include <fstream>
 #include <iostream>
+#include <vector>
 using namespace std;
 
 namespace yuc {
-	enum LinkageTypes {
-	  ExternalLinkage = 0, AvailableExternallyLinkage, LinkOnceAnyLinkage, LinkOnceODRLinkage,
-	  WeakAnyLinkage, WeakODRLinkage, AppendingLinkage, InternalLinkage,
-	  PrivateLinkage, ExternalWeakLinkage, CommonLinkage
-	};
-
-	typedef enum {
-		ArrayType = 0, TypedPointerType, FunctionType, IntegerType,
-		PointerType, StructType, VectorType
-	} CTypeKind;
-
-	struct CType {
+	class CType {
+	public:
+		typedef enum {
+			ArrayType = 0, TypedPointerType, FunctionType, IntegerType,
+			PointerType, classType, VectorType
+		} CTypeKind;
 		CTypeKind kind;
 		int size;
 		bool is_unsigned;
 	};
 
-	struct CValue {
+	class CValue {
+	public:
 		int64_t val;
 	};
 
-	struct Ast {
+	class Ast {
+	public:
+		enum LinkageTypes {
+		  ExternalLinkage = 0, AvailableExternallyLinkage, LinkOnceAnyLinkage, LinkOnceODRLinkage,
+		  WeakAnyLinkage, WeakODRLinkage, AppendingLinkage, InternalLinkage,
+		  PrivateLinkage, ExternalWeakLinkage, CommonLinkage
+		};
 		bool is_function;
+		bool is_definition;
 		bool is_static;
 		string name;
 		int align;
