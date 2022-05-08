@@ -26,18 +26,13 @@ namespace yuc {
 
 	class Ast {
 	public:
-		enum LinkageTypes {
-		  ExternalLinkage = 0, AvailableExternallyLinkage, LinkOnceAnyLinkage, LinkOnceODRLinkage,
-		  WeakAnyLinkage, WeakODRLinkage, AppendingLinkage, InternalLinkage,
-		  PrivateLinkage, ExternalWeakLinkage, CommonLinkage
-		};
 		bool is_function;
 		bool is_definition;
 		bool is_static;
+		bool is_live;
 		string name;
 		int align;
 		Ast *next;
-		LinkageTypes linkage_type;
 		bool is_preemptable;
 
 		CType *type;

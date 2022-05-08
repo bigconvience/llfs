@@ -4,6 +4,7 @@
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Verifier.h"
+#include "llvm/IR/GlobalValue.h"
 
 using namespace llvm;
 using namespace yuc;
@@ -31,12 +32,23 @@ static Type *yuc2LLVMType(Ast *yucNode) {
   return type;
 }
 
+static GlobalValue::LinkageTypes yuc2LinkageType(Ast *yucNode) {
+  GlobalValue::LinkageTypes ret = GlobalValue::LinkageTypes::ExternalLinkage;
+  if (yucNode->is_static) {
+    ret = GlobalValue::LinkageTypes::InternalLinkage;
+  }
+
+  return ret;
+}
+
+
 static void InitializeModule(const string &moduleName) {
   TheContext = std::make_unique<LLVMContext>();
   TheModule = std::make_unique<Module>(moduleName, *TheContext);
   // Create a new builder for the module.
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
 }
+
 
 /**
  * https://llvm.org/doxygen/classllvm_1_1GlobalVariable.html
@@ -49,26 +61,25 @@ GlobalVariable *createGlobalVar(Ast *yucNode) {
     TheModule->getOrInsertGlobal(name, type);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
     gVar->setAlignment(MaybeAlign(yucNode->align));
-    if (yucNode->is_preemptable) {
+    if (!yucNode->is_static) {
       gVar->setDSOLocal(true);
     }
     CValue *cvalue = yucNode->initializer;
     gVar->setInitializer(Builder->getInt32(cvalue->val));
-    gVar->setLinkage(static_cast<GlobalValue::LinkageTypes>(yucNode->linkage_type));
+    gVar->setLinkage(yuc2LinkageType(yucNode));
     return gVar;
 }
 
 static void emit_data(Ast *ast) {
-  for (Ast *cur = ast; cur; cur = cur->next) {
-    if (ast->is_function) {
+  for (Ast *var = ast; var; var = var->next) {
+    if (var->is_function || !var->is_definition) {
       continue;      
     }
-    cout << "emit_data name: " << cur->name << endl;
-    CType *ctype = cur->type;
+    CType *ctype = var->type;
     if (ctype->kind != CType::IntegerType) {
       continue;
     }
-    createGlobalVar(cur);
+    createGlobalVar(var);
   }
 }
 
@@ -101,13 +112,9 @@ static void emit_function(Ast *ast) {
   for (Ast *fn = ast; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition)
       continue;
-    cout << "emit_text name: " << fn->name << endl;
     buildFunction(fn);
   }
 }
-
-
-
 
 void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
   if (!ast) {
