@@ -37,6 +37,14 @@ namespace yuc {
 
 		CType *type;
 		CValue *initializer;
+
+		 // Function
+	  bool is_inline;
+	  Ast *params;
+	  Ast *locals;
+	  Ast *va_area;
+	  Ast *alloca_bottom;
+	  int stack_size;
 	};
 
 	void ir_gen(Ast *ast, ofstream &out, const string &moduleName);

@@ -90,7 +90,17 @@ static Ast **emit_text(Obj *prog, Ast **ppCur) {
       continue;
     cout << "emit_text, fn name:"<< fn->name << "\n"; 
     Ast *cur = buildAst(fn);
-    dump_ast(cur);
+    Ast **pParam = &cur->params;
+
+    for (Obj *var = fn->params; var; var = var->next) {
+
+      Ast *param = new Ast();
+      param->name = var->name;
+      param->type = build_ctype(var);
+
+      *pParam = param;
+      pParam = &param->params; 
+    }
 
     *ppCur = cur;
     ppCur = &cur->next;

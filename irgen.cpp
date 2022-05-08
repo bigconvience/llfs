@@ -27,8 +27,12 @@ static Type *yuc2LLVMType(Ast *yucNode) {
           type = Builder->getInt32Ty();
           break;
       }
-    break;
+      break;
+    default:
+      type = Builder->getInt32Ty();
+      break;
   }
+  
   return type;
 }
 
@@ -83,9 +87,29 @@ static void emit_data(Ast *ast) {
   }
 }
 
-Function *createFunc(Type *RetTy, ArrayRef<Type *> Params, std::string Name, bool isVarArg = false) {
-  FunctionType *funcType = FunctionType::get(RetTy, Params, isVarArg);
-  Function *fooFunc = Function::Create(funcType, Function::ExternalLinkage, Name, TheModule.get());
+static std::vector<Type *> yuc2ParamTypes(Ast *funcNode) {
+  std::vector<Type *> types;
+  for (Ast *param = funcNode->params; param; param = param->next) {
+    Type *type = yuc2LLVMType(param);
+    types.push_back(type);
+  }
+  return types;
+}
+
+static std::vector<std::string> yuc2FuncArgs(Ast *funcNode) {
+  std::vector<std::string> FuncArgs;
+  for (Ast *param = funcNode->params; param; param = param->next) {
+    FuncArgs.push_back(param->name);
+  }
+  return FuncArgs;
+}
+
+Function *createFunc(Ast *funcNode, Type *RetTy, bool isVarArg = false) {
+  std::vector<Type *> params = yuc2ParamTypes(funcNode);
+  FunctionType *funcType = FunctionType::get(RetTy, params, isVarArg);
+  std::string funcName = funcNode->name;
+  GlobalValue::LinkageTypes linkageType = yuc2LinkageType(funcNode);
+  Function *fooFunc = Function::Create(funcType, linkageType, funcName, TheModule.get());
   return fooFunc;
 }
 
@@ -97,15 +121,11 @@ void setFuncArgs(Function *Func, std::vector<std::string> FuncArgs) {
     }
 }
 void buildFunction(Ast *funcNode) {
-  Function *fooFunc = createFunc(Builder->getInt32Ty(), {Builder->getInt32Ty()}, "main");
+  Function *fooFunc = createFunc(funcNode, Builder->getInt32Ty());
   BasicBlock *entry = BasicBlock::Create(*TheContext, "entry", fooFunc);
   Builder->SetInsertPoint(entry);
   Builder->CreateRet(Builder->getInt32(0));
   verifyFunction(*fooFunc);
-  
-  std::vector<std::string> FuncArgs;
-  FuncArgs.push_back("left");
-  //setFuncArgs(fooFunc, FuncArgs);
 }
 
 static void emit_function(Ast *ast) {
