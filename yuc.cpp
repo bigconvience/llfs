@@ -4,6 +4,13 @@
 using namespace yuc;
 using namespace std;
 
+static void dump_node(CNode *node) {
+  cout << "dump_node\n\t";
+  for (CNode *cur = node; cur; cur = node->next) {
+    cout << " kind: " << cur->kind << endl; 
+  }
+}
+
 static void dump_ast(Ast *ast) {
   cout << "dump_ast\n\t";
   for (Ast *cur = ast; cur; cur = cur->next) {
@@ -11,23 +18,37 @@ static void dump_ast(Ast *ast) {
     << " is_function: " << cur->is_function
     << " is_definition: " << cur->is_definition 
     << "\n\t";
+
+    if (cur->is_function) {
+      cout << "   function body\n\t";
+      dump_node(cur->body);
+    }
   }
   cout << endl;
 }
 
-static CType *build_ctype(Obj *obj) {
+static CType *build_ctype(Type *ty) {
+  if (!ty) {
+    return NULL;
+  }
   CType *ctype = new CType();
-  Type *ty = obj->ty;
   ctype->size = ty->size;
   ctype->is_unsigned = ty->is_unsigned;
   TypeKind kind = ty->kind;
-  cout << " build ctype: kind " << kind << endl;
+  cout << " build ctype size " << ty->size
+      << " kind " << kind << endl;
   switch(kind) {
+    case TY_CHAR:
     case TY_INT:
       ctype->kind = CType::IntegerType;
       break;
     case TY_ARRAY:
       ctype->kind = CType::ArrayType;
+      break;
+    case TY_PTR:
+      ctype->kind = CType::PointerType;
+      cout << " build_tye pointer base\t";
+      ctype->base = build_ctype(ty->base);
       break;
     default:
       cerr << "unkonw kind: " << kind << endl;
@@ -73,13 +94,36 @@ static Ast **emit_data(Obj *prog, Ast **ppCur) {
       ? MAX(16, var->align) : var->align;
 
     cur->align = align;
-    cur->type = build_ctype(var);
+    cur->type = build_ctype(var->ty);
     cur->initializer = build_cvalue(var);
 
     *ppCur = cur;
     ppCur = &cur->next;
    }
    return ppCur;
+}
+
+static CNode **gen_stmt(Node *node, CNode **ppCur) {
+  CNode *curNode;
+  cout << "gen_stmt, node kind:"<< node->kind << "\n"; 
+  switch(node->kind) {
+    case ND_BLOCK: // 32
+      for (Node *n = node->body; n; n = n->next)
+        ppCur = gen_stmt(n, ppCur);
+      return ppCur;
+    case ND_RETURN: // 26
+      if (node->lhs) {
+        cout << "ND_RETURN:"<< ND_RETURN << "\n"; 
+        curNode = new CNode;
+        curNode->kind = static_cast<CNode::CNodeKind>(ND_RETURN);
+        Type *ty = node->lhs->ty;
+        curNode->type = build_ctype(ty);
+        *ppCur = curNode;
+        ppCur = &curNode->next;
+      }
+      return ppCur;
+  }
+  return ppCur;
 }
 
 static Ast **emit_text(Obj *prog, Ast **ppCur) {
@@ -96,12 +140,14 @@ static Ast **emit_text(Obj *prog, Ast **ppCur) {
 
       Ast *param = new Ast();
       param->name = var->name;
-      param->type = build_ctype(var);
+      param->type = build_ctype(var->ty);
 
       *pParam = param;
-      pParam = &param->params; 
+      pParam = &param->next; 
     }
 
+    gen_stmt(fn->body, &cur->body);
+    
     *ppCur = cur;
     ppCur = &cur->next;
   }

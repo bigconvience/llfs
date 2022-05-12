@@ -14,25 +14,37 @@ static std::unique_ptr<Module> TheModule;
 // https://llvm.org/doxygen/IRBuilder_8h_source.html
 static std::unique_ptr<IRBuilder<>> Builder;
 
-static Type *yuc2LLVMType(Ast *yucNode) {
-  CType *ctype = yucNode->type;
-  Type *type;
+static Type *yuc2LLVMType(CType *ctype) {
+  Type *type, *base;
   int size = ctype->size;
   cout << "yuc2LLVMType size: " << size 
-      << " type: " << ctype->kind << endl;
+      << " kind: " << ctype->kind << endl;
   switch (ctype->kind) {
     case CType::IntegerType:
+    cout << "\tIntegerType ";
       switch(size) {
         case 4:
           type = Builder->getInt32Ty();
           break;
+        case 1:
+          type = Builder->getInt8Ty();
+          break;
+        default:
+          type = Builder->getInt32Ty();
+          break;
       }
+      break;
+    case CType::PointerType:
+      cout << "\tPointerType ";
+      base = yuc2LLVMType(ctype->base);
+      type = PointerType::get(base, 0);
       break;
     default:
       type = Builder->getInt32Ty();
       break;
   }
   
+  cout << endl;
   return type;
 }
 
@@ -61,7 +73,7 @@ static void InitializeModule(const string &moduleName) {
 GlobalVariable *createGlobalVar(Ast *yucNode) {
     // std::cout << "createGlobalVar name:" << name << endl;
     string name = yucNode->name;
-    Type *type = yuc2LLVMType(yucNode);
+    Type *type = yuc2LLVMType(yucNode->type);
     TheModule->getOrInsertGlobal(name, type);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
     gVar->setAlignment(MaybeAlign(yucNode->align));
@@ -89,11 +101,21 @@ static void emit_data(Ast *ast) {
 
 static std::vector<Type *> yuc2ParamTypes(Ast *funcNode) {
   std::vector<Type *> types;
+  std::cout << "yuc2ParamTypes " << funcNode->name << std::endl;
   for (Ast *param = funcNode->params; param; param = param->next) {
-    Type *type = yuc2LLVMType(param);
+    Type *type = yuc2LLVMType(param->type);
     types.push_back(type);
   }
   return types;
+}
+
+static Type *yuc2RetType(CNode *body) {
+  CNode *cur = body;
+  while(cur && cur->next) {
+    cur = cur->next;
+  }
+  Type *type = yuc2LLVMType(cur->type);
+  return type;
 }
 
 static std::vector<std::string> yuc2FuncArgs(Ast *funcNode) {
@@ -104,8 +126,10 @@ static std::vector<std::string> yuc2FuncArgs(Ast *funcNode) {
   return FuncArgs;
 }
 
-Function *createFunc(Ast *funcNode, Type *RetTy, bool isVarArg = false) {
+Function *createFunc(Ast *funcNode, bool isVarArg = false) {
   std::vector<Type *> params = yuc2ParamTypes(funcNode);
+  cout << "createFunc params: " << params.size();
+  Type *RetTy = yuc2RetType(funcNode->body);
   FunctionType *funcType = FunctionType::get(RetTy, params, isVarArg);
   std::string funcName = funcNode->name;
   GlobalValue::LinkageTypes linkageType = yuc2LinkageType(funcNode);
@@ -121,7 +145,7 @@ void setFuncArgs(Function *Func, std::vector<std::string> FuncArgs) {
     }
 }
 void buildFunction(Ast *funcNode) {
-  Function *fooFunc = createFunc(funcNode, Builder->getInt32Ty());
+  Function *fooFunc = createFunc(funcNode);
   BasicBlock *entry = BasicBlock::Create(*TheContext, "entry", fooFunc);
   Builder->SetInsertPoint(entry);
   Builder->CreateRet(Builder->getInt32(0));
