@@ -128,7 +128,7 @@ static std::vector<std::string> yuc2FuncArgs(Ast *funcNode) {
 
 Function *createFunc(Ast *funcNode, bool isVarArg = false) {
   std::vector<Type *> params = yuc2ParamTypes(funcNode);
-  cout << "createFunc params: " << params.size();
+  cout << "createFunc params size:" << params.size() << endl;
   Type *RetTy = yuc2RetType(funcNode->body);
   FunctionType *funcType = FunctionType::get(RetTy, params, isVarArg);
   std::string funcName = funcNode->name;
@@ -144,10 +144,27 @@ void setFuncArgs(Function *Func, std::vector<std::string> FuncArgs) {
       AI->setName(FuncArgs[Idx]);
     }
 }
+
+static void buildFunctionBody(Function *Func) {
+  Function::arg_iterator AI, AE;
+  std::vector<std::pair<Argument *, Value *>> args;
+  // create alloca arg
+  for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI) {
+    Value *argValue = Builder->CreateAlloca(AI->getType(), nullptr);
+    args.push_back(make_pair(AI, argValue));
+  }
+  // create store arg
+  for(auto first = args.begin(); first < args.end(); ++first) {
+    Builder->CreateStore(first->first, first->second);
+  }
+}
+
 void buildFunction(Ast *funcNode) {
+  cout << "buildFunction " << funcNode->name << endl;
   Function *fooFunc = createFunc(funcNode);
-  BasicBlock *entry = BasicBlock::Create(*TheContext, "entry", fooFunc);
+  BasicBlock *entry = BasicBlock::Create(*TheContext, "", fooFunc);
   Builder->SetInsertPoint(entry);
+  buildFunctionBody(fooFunc);
   Builder->CreateRet(Builder->getInt32(0));
   verifyFunction(*fooFunc);
 }
@@ -168,6 +185,8 @@ void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
   InitializeModule(moduleName);
   emit_data(ast);
   emit_function(ast);
+
+  Builder->CreateGlobalStringPtr(StringRef("Hello, world!\n"));
   TheModule->print(errs(), nullptr);
   out << "yuc end" << std::endl;
 }
