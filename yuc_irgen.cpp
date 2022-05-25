@@ -13,15 +13,120 @@ static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<Module> TheModule;
 // https://llvm.org/doxygen/IRBuilder_8h_source.html
 static std::unique_ptr<IRBuilder<>> Builder;
+static int stmt_level = 0;
+static int stmt_count = 0;
+static std::ofstream output("./test2/ast_ir.out");
+
+static string buildSeperator(int count, string target) {
+  string result = "";
+  for (int i = 1; i < count; i++) {
+    result.append("\t");
+  }
+  result.append(target);
+  return result;
+}
+
+static void gen_addr(CNode *node) {
+  int cur_level = ++stmt_level;
+  output << buildSeperator(cur_level, "gen_addr")
+      << " node kind:" << node->kind << endl;
+  cur_level++;
+
+  switch(node->kind) {
+    case CNode::CNodeKind::ND_VAR:
+      output << buildSeperator(cur_level, "ND_VAR:") << node->kind << endl;
+      break;
+  }
+  --stmt_level;
+}
+
+static void cast(CType *from, CType *to) {
+
+}
+
+static void gen_expr(CNode *node) {
+  int cur_level = ++stmt_level;
+  output << buildSeperator(cur_level, "gen_expr start, kind:") 
+  << node->kind <<  endl; 
+  cur_level++;
+  switch(node->kind) {
+    case CNode::CNodeKind::ND_NULL_EXPR:
+      output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << endl;
+      break;
+    case CNode::CNodeKind::ND_COMMA:
+      output << buildSeperator(cur_level, "ND_COMMA:") << node->kind << endl;
+      gen_expr(node->lhs);
+      gen_expr(node->rhs);
+      break;
+    case CNode::CNodeKind::ND_COND:
+      output << buildSeperator(cur_level, "ND_COND:") << node->kind << endl;
+      break;
+    case CNode::CNodeKind::ND_ASSIGN:
+      output << buildSeperator(cur_level, "ND_ASSIGN:") << node->kind << endl;
+      gen_addr(node->lhs);
+      gen_expr(node->rhs);
+
+      break;
+    case CNode::CNodeKind::ND_NUM:
+      output << buildSeperator(cur_level, "ND_NUM:") << node->kind << endl;
+      break;
+    case CNode::CNodeKind::ND_MEMZERO:
+      output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << endl;
+      break;
+    case CNode::CNodeKind::ND_VAR:
+      output << buildSeperator(cur_level, "ND_VAR:") << node->kind << endl;
+      break;
+    case CNode::CNodeKind::ND_CAST:
+      output << buildSeperator(cur_level, "ND_CAST:") << node->kind << endl;
+      gen_expr(node->lhs);
+      cast(node->lhs->type, node->type);
+      break;
+    case CNode::CNodeKind::ND_ADD:
+      output << buildSeperator(cur_level, "ND_ADD:") << node->kind << endl;
+      break;
+
+  }
+  stmt_level--;
+  cur_level--;
+  output << buildSeperator(cur_level, "gen_expr end") << endl; 
+}
+
+static void gen_stmt(CNode *node) {
+  int cur_count = ++stmt_count;
+  int level = ++stmt_level;
+  output << buildSeperator(level, "gen_stmt start ==> ") << cur_count << endl;
+  switch(node->kind) {
+    case CNode::CNodeKind::ND_BLOCK: // 32
+      output << buildSeperator(level+1, "ND_BLOCK:") << node->kind << "\n"; 
+      for (CNode *n = node->body; n; n = n->next) {
+        gen_stmt(n);
+      }
+      break;
+    case CNode::CNodeKind::ND_EXPR_STMT:
+      output << buildSeperator(level+1, "ND_EXPR_STMT:")<< node->kind << "\n"; 
+      gen_expr(node->lhs);
+      break;
+
+    case CNode::CNodeKind::ND_RETURN:
+      output << buildSeperator(level+1, "ND_RETURN:") << node->kind << "\n"; 
+      break;
+    default:
+      output << buildSeperator(level+1, "gen_stmt unknow kind: ") << node->kind << endl;
+      break;
+  }
+  output << buildSeperator(level, "gen_stmt end <<<=== ") <<  cur_count << endl;
+  --stmt_level;
+}
 
 static Type *yuc2LLVMType(CType *ctype) {
   Type *type, *base;
   int size = ctype->size;
-  cout << "yuc2LLVMType size: " << size 
-      << " kind: " << ctype->kind << endl;
+  int cur_level = stmt_level;
+  cout << buildSeperator(cur_level, "yuc2LLVMType size: ")
+      << size << " kind: " << ctype->kind << " ";
   switch (ctype->kind) {
-    case CType::IntegerType:
-    cout << "\tIntegerType ";
+    case CType::TY_INT:
+    cout << "IntegerType ";
       switch(size) {
         case 4:
           type = Builder->getInt32Ty();
@@ -34,8 +139,8 @@ static Type *yuc2LLVMType(CType *ctype) {
           break;
       }
       break;
-    case CType::PointerType:
-      cout << "\tPointerType ";
+    case CType::TY_PTR:
+      cout << "PointerType ";
       base = yuc2LLVMType(ctype->base);
       type = PointerType::get(base, 0);
       break;
@@ -71,8 +176,9 @@ static void InitializeModule(const string &moduleName) {
  * https://www.llvm.org/doxygen/classllvm_1_1GlobalVariable.html
  */ 
 GlobalVariable *createGlobalVar(Ast *yucNode) {
-    // std::cout << "createGlobalVar name:" << name << endl;
     string name = yucNode->name;
+    CType *ctype = yucNode->type;
+    std::cout << "createGlobalVar kind:" << ctype->kind << endl;
     Type *type = yuc2LLVMType(yucNode->type);
     TheModule->getOrInsertGlobal(name, type);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
@@ -91,8 +197,10 @@ static void emit_data(Ast *ast) {
     if (var->is_function || !var->is_definition) {
       continue;      
     }
+    std::cout << "emit_data name:" << var->name << endl;
+
     CType *ctype = var->type;
-    if (ctype->kind != CType::IntegerType) {
+    if (ctype->kind != CType::TY_INT) {
       continue;
     }
     createGlobalVar(var);
@@ -100,20 +208,25 @@ static void emit_data(Ast *ast) {
 }
 
 static std::vector<Type *> yuc2ParamTypes(Ast *funcNode) {
+  int cur_level = ++stmt_level;
   std::vector<Type *> types;
-  std::cout << "yuc2ParamTypes " << funcNode->name << std::endl;
+  std::cout << buildSeperator(cur_level, "yuc2ParamTypes ")
+     << funcNode->name << std::endl;
   for (Ast *param = funcNode->params; param; param = param->next) {
     Type *type = yuc2LLVMType(param->type);
     types.push_back(type);
   }
+  --stmt_level;
   return types;
 }
 
 static Type *yuc2RetType(CNode *body) {
   CNode *cur = body;
   while(cur && cur->next) {
+    cout << "yuc2RetType middle kind " << cur->kind << endl;
     cur = cur->next;
   }
+  cout << "yuc2RetType last kind " << cur->kind << endl;
   Type *type = yuc2LLVMType(cur->type);
   return type;
 }
@@ -169,24 +282,29 @@ void buildFunction(Ast *funcNode) {
   verifyFunction(*fooFunc);
 }
 
-static void emit_function(Ast *ast) {
+static void emit_text(Ast *ast) {
   for (Ast *fn = ast; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition)
       continue;
+    stmt_count = 0;
+    output << "emit_text, fn name:" << fn->name << endl;
+    gen_stmt(fn->body);
     buildFunction(fn);
+    output << endl;
   }
 }
 
 void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
+  cout << "ir_gen start\n";
   if (!ast) {
     std::cerr << "no ast" << std::endl;
     return;
   }
   InitializeModule(moduleName);
   emit_data(ast);
-  emit_function(ast);
+  emit_text(ast);
 
-  Builder->CreateGlobalStringPtr(StringRef("Hello, world!\n"));
+  // Builder->CreateGlobalStringPtr(StringRef("Hello, world!\n"));
   TheModule->print(errs(), nullptr);
   out << "yuc end" << std::endl;
 }

@@ -1,15 +1,13 @@
 #include <stdio.h>
 
-int s = 1;
-int t = 2;
+int s1 = 1;
+int t1 = 2;
 
 int sum(int, int);
 
-int main() {
-	int result = sum(s, t);
-	return result;
-}
+
 
 int sum(int a, int b) {
-	return a + b;
+	int c = a + b;
+	return c;
 }
