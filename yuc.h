@@ -132,53 +132,53 @@ typedef class CToken CToken;
 	class CNode {
 	public:
 		typedef enum {
-		  ND_NULL_EXPR, // Do nothing
-		  ND_ADD,       // +
-		  ND_SUB,       // -
-		  ND_MUL,       // *
-		  ND_DIV,       // /
-		  ND_NEG,       // unary -
-		  ND_MOD,       // %
-		  ND_BITAND,    // &
-		  ND_BITOR,     // |
-		  ND_BITXOR,    // ^
-		  ND_SHL,       // <<
-		  ND_SHR,       // >>
-		  ND_EQ,        // ==
-		  ND_NE,        // !=
-		  ND_LT,        // <
-		  ND_LE,        // <=
-		  ND_ASSIGN,    // =
-		  ND_COND,      // ?:
-		  ND_COMMA,     // ,
-		  ND_MEMBER,    // . (struct member access)
-		  ND_ADDR,      // unary &
-		  ND_DEREF,     // unary *
-		  ND_NOT,       // !
-		  ND_BITNOT,    // ~
-		  ND_LOGAND,    // &&
-		  ND_LOGOR,     // ||
-		  ND_RETURN,    // "return"
-		  ND_IF,        // "if"
-		  ND_FOR,       // "for" or "while"
-		  ND_DO,        // "do"
-		  ND_SWITCH,    // "switch"
-		  ND_CASE,      // "case"
-		  ND_BLOCK,     // { ... }
-		  ND_GOTO,      // "goto"
-		  ND_GOTO_EXPR, // "goto" labels-as-values
-		  ND_LABEL,     // Labeled statement
-		  ND_LABEL_VAL, // [GNU] Labels-as-values
-		  ND_FUNCALL,   // Function call
-		  ND_EXPR_STMT, // Expression statement
-		  ND_STMT_EXPR, // Statement expression
-		  ND_VAR,       // Variable
-		  ND_VLA_PTR,   // VLA designator
-		  ND_NUM,       // Integer
-		  ND_CAST,      // Type cast
-		  ND_MEMZERO,   // Zero-clear a stack variable
-		  ND_ASM,       // "asm"
-		  ND_CAS,       // Atomic compare-and-swap
+		  ND_NULL_EXPR, //0 Do nothing
+		  ND_ADD,       //1 +
+		  ND_SUB,       //2 -
+		  ND_MUL,       //3 *
+		  ND_DIV,       //4 /
+		  ND_NEG,       //5 unary -
+		  ND_MOD,       //6 %
+		  ND_BITAND,    //7 &
+		  ND_BITOR,     //8 |
+		  ND_BITXOR,    //9 ^
+		  ND_SHL,       //10 <<
+		  ND_SHR,       //11 >>
+		  ND_EQ,        //12 ==
+		  ND_NE,        //13 !=
+		  ND_LT,        //14 <
+		  ND_LE,        //15 <=
+		  ND_ASSIGN,    //16 =
+		  ND_COND,      //17 ?:
+		  ND_COMMA,     //18 ,
+		  ND_MEMBER,    //19 . (struct member access)
+		  ND_ADDR,      //20 unary &
+		  ND_DEREF,     //21 unary *
+		  ND_NOT,       //22 !
+		  ND_BITNOT,    //23 ~
+		  ND_LOGAND,    //24 &&
+		  ND_LOGOR,     //25 ||
+		  ND_RETURN,    //26 "return"
+		  ND_IF,        //27 "if"
+		  ND_FOR,       //28 "for" or "while"
+		  ND_DO,        //29 "do"
+		  ND_SWITCH,    //30 "switch"
+		  ND_CASE,      //31 "case"
+		  ND_BLOCK,     //32 { ... }
+		  ND_GOTO,      //33 "goto"
+		  ND_GOTO_EXPR, //34 "goto" labels-as-values
+		  ND_LABEL,     //35 Labeled statement
+		  ND_LABEL_VAL, //36 [GNU] Labels-as-values
+		  ND_FUNCALL,   //37 Function call
+		  ND_EXPR_STMT, //38 Expression statement
+		  ND_STMT_EXPR, //39 Statement expression
+		  ND_VAR,       //40 Variable
+		  ND_VLA_PTR,   //41 VLA designator
+		  ND_NUM,       //42 Integer
+		  ND_CAST,      //43 Type cast
+		  ND_MEMZERO,   //44 Zero-clear a stack variable
+		  ND_ASM,       //45 "asm"
+		  ND_CAS,       //46 Atomic compare-and-swap
 		  ND_EXCH,
 		} CNodeKind;
 
@@ -188,15 +188,182 @@ typedef class CToken CToken;
 
 		CNode *lhs;
 		CNode *rhs;
-		CNode *body;
-  	// Variable
-  	Ast *var;
-		// Numeric literal
+
+		// "if" or "for" statement
+	  CNode *cond;
+	  CNode *then;
+	  CNode *els;
+	  CNode *init;
+	  CNode *inc;
+
+	  // "break" and "continue" labels
+	  string brk_label;
+	  string cont_label;
+
+	  // Block or statement expression
+  	CNode *body;
+
+	  // Struct member access
+	  CMember *member;
+
+	  // Function call
+	  CType *func_ty;
+	  CNode *args;
+	  bool pass_by_stack;
+	  Ast *ret_buffer;
+
+	  // Goto or labeled statement, or labels-as-values
+	  string label;
+	  string unique_label;
+	  CNode *goto_next;
+
+	  // Switch
+	  CNode *case_next;
+	  CNode *default_case;
+
+	  // Case
+	  long begin;
+	  long end;
+
+	  // "asm" string literal
+	  string asm_str;
+
+	  // Atomic compare-and-swap
+	  CNode *cas_addr;
+	  CNode *cas_old;
+	  CNode *cas_new;
+
+	  // Atomic op= operators
+	  Ast *atomic_addr;
+	  CNode *atomic_expr;
+
+	  // Variable
+	  Ast *var;
+
+	  // Numeric literal
 	  int64_t val;
 	  long double fval;
+
+
+		static string node_kind_info(CNodeKind kind) {
+			switch(kind) {
+				case ND_NULL_EXPR:
+					return "ND_NULL_EXPR";
+				case ND_ADD:
+					return "ND_ADD";
+				case ND_SUB:
+					return "ND_SUB";
+				case ND_MUL:
+					return "ND_MUL";
+				case ND_DIV:
+					return "ND_DIV";
+				case ND_NEG:
+					return "ND_NEG";
+				case ND_MOD:
+					return "ND_MOD";
+				case ND_BITAND:
+					return "ND_BITAND";
+				case ND_BITOR:
+					return "ND_BITOR";
+				case ND_BITXOR:
+					return "ND_BITXOR";
+				case ND_SHL:
+					return "ND_SHL";
+				case ND_SHR:
+					return "ND_SHR";
+				case ND_EQ:
+					return "ND_EQ";
+				case ND_NE:
+					return "ND_NE";
+				case ND_LT:
+					return "ND_LT";
+				case ND_LE:
+					return "ND_LE";
+				case ND_ASSIGN:
+					return "ND_ASSIGN";
+				case ND_COND:
+					return "ND_COND";
+				case ND_COMMA:
+					return "ND_COMMA";
+				case ND_MEMBER:
+					return "ND_MEMBER";
+				case ND_ADDR:
+					return "ND_ADDR";
+				case ND_DEREF:
+					return "ND_DEREF";
+				case ND_NOT:
+					return "ND_NOT";
+				case ND_BITNOT:
+					return "ND_BITNOT";
+				case ND_LOGAND:
+					return "ND_LOGAND";
+				case ND_LOGOR:
+					return "ND_LOGOR";
+				case ND_RETURN:
+					return "ND_RETURN";
+				case ND_IF:
+					return "ND_IF";
+				case ND_DO:
+					return "ND_DO";
+				case ND_SWITCH:
+					return "ND_SWITCH";
+				case ND_CASE:
+					return "ND_CASE";
+				case ND_BLOCK:
+					return "ND_BLOCK";
+				case ND_GOTO:
+					return "ND_GOTO";
+				case ND_GOTO_EXPR:
+					return "ND_GOTO_EXPR";
+				case ND_LABEL:
+					return "ND_LABEL";
+				case ND_LABEL_VAL:
+					return "ND_LABEL_VAL";
+				case ND_FUNCALL:
+					return "ND_FUNCALL";
+				case ND_EXPR_STMT:
+					return "ND_EXPR_STMT";
+				case ND_STMT_EXPR:
+					return "ND_STMT_EXPR";
+				case ND_VAR:
+					return "ND_VAR";
+				case ND_VLA_PTR:
+					return "ND_VLA_PTR";
+				case ND_NUM:
+					return "ND_NUM";
+				case ND_CAST:
+					return "ND_CAST";
+				case ND_MEMZERO:
+					return "ND_MEMZERO";
+				case ND_ASM:
+					return "ND_ASM";
+				case ND_CAS:
+					return "ND_CAS";
+				case ND_EXCH:
+					return "ND_EXCH";
+				
+				default:
+					return "unkonw";
+			}
+		}
 	};
 
+	// Struct member
+	class CMember {
+	public:
+	  CMember *next;
+	  CType *ty;
+	  CToken *tok; // for error message
+	  CToken *name;
+	  int idx;
+	  int align;
+	  int offset;
 
+	  // Bitfield
+	  bool is_bitfield;
+	  int bit_offset;
+	  int bit_width;
+	};
 
 	void ir_gen(Ast *ast, ofstream &out, const string &moduleName);
 }

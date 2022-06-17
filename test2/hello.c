@@ -1,13 +1,4 @@
-#include <stdio.h>
-
-int s1 = 1;
-int t1 = 2;
-
-int sum(int, int);
-
-
-
-int sum(int a, int b) {
-	int c = a + b;
-	return c;
+int ret3(void) {
+  return 3;
+  return 5;
 }

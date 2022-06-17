@@ -119,11 +119,9 @@ static void gen_stmt(CNode *node) {
 }
 
 static Type *yuc2LLVMType(CType *ctype) {
+  cout << "yuc2LLVMType start" << endl;
   Type *type, *base;
   int size = ctype->size;
-  int cur_level = stmt_level;
-  cout << buildSeperator(cur_level, "yuc2LLVMType size: ")
-      << size << " kind: " << ctype->kind << " ";
   switch (ctype->kind) {
     case CType::TY_INT:
     cout << "IntegerType ";
@@ -220,14 +218,31 @@ static std::vector<Type *> yuc2ParamTypes(Ast *funcNode) {
   return types;
 }
 
-static Type *yuc2RetType(CNode *body) {
-  CNode *cur = body;
-  while(cur && cur->next) {
-    cout << "yuc2RetType middle kind " << cur->kind << endl;
+static CNode *getFuntionEnd(CNode *block) {
+  CNode *cur = block->body;
+  while(cur) {
+    if (cur->kind == CNode::CNodeKind::ND_RETURN) {
+      return cur;
+      break;
+    }
     cur = cur->next;
   }
-  cout << "yuc2RetType last kind " << cur->kind << endl;
-  Type *type = yuc2LLVMType(cur->type);
+  cerr << "no ret" << endl;
+  return NULL;
+}
+
+static Type *yuc2RetType(CNode *block) {
+  CNode *cur = block->body, *retNode = nullptr;
+  while(cur) {
+    if (cur->kind == CNode::CNodeKind::ND_RETURN) {
+      retNode = cur;
+      break;
+    }
+    cur = cur->next;
+  }
+
+  cout << "yuc2RetType last kind:" << CNode::node_kind_info(retNode->kind) << endl;
+  Type *type = yuc2LLVMType(retNode->lhs->type);
   return type;
 }
 
@@ -247,6 +262,9 @@ Function *createFunc(Ast *funcNode, bool isVarArg = false) {
   std::string funcName = funcNode->name;
   GlobalValue::LinkageTypes linkageType = yuc2LinkageType(funcNode);
   Function *fooFunc = Function::Create(funcType, linkageType, funcName, TheModule.get());
+  if(!funcNode->is_static) {
+    fooFunc->setDSOLocal(true);
+  }
   return fooFunc;
 }
 
@@ -256,6 +274,25 @@ void setFuncArgs(Function *Func, std::vector<std::string> FuncArgs) {
   for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI, ++Idx) {
       AI->setName(FuncArgs[Idx]);
     }
+}
+
+static Value *getValue(CNode *node) {
+  cout<< "getValue kind:" << CNode::node_kind_info(node->kind) << endl;
+  switch(node->kind) {
+    case CNode::CNodeKind::ND_NUM:
+      return Builder->getInt32(node->val);
+      break;
+  }
+  return NULL;
+}
+
+static void FinishFunction(CNode *end) {
+  cout << "FinishFunction " << endl;
+  CNode *ndCast = end->lhs;
+  Type *retType = yuc2LLVMType(ndCast->type);
+  CNode *ndRet = ndCast->lhs;
+  Value *val = getValue(ndRet);
+  Builder->CreateRet(val);
 }
 
 static void buildFunctionBody(Function *Func) {
@@ -278,7 +315,8 @@ void buildFunction(Ast *funcNode) {
   BasicBlock *entry = BasicBlock::Create(*TheContext, "", fooFunc);
   Builder->SetInsertPoint(entry);
   buildFunctionBody(fooFunc);
-  Builder->CreateRet(Builder->getInt32(0));
+  CNode *end = getFuntionEnd(funcNode->body);
+  FinishFunction(end);
   verifyFunction(*fooFunc);
 }
 
@@ -286,11 +324,7 @@ static void emit_text(Ast *ast) {
   for (Ast *fn = ast; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition)
       continue;
-    stmt_count = 0;
-    output << "emit_text, fn name:" << fn->name << endl;
-    gen_stmt(fn->body);
     buildFunction(fn);
-    output << endl;
   }
 }
 
@@ -306,6 +340,6 @@ void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
 
   // Builder->CreateGlobalStringPtr(StringRef("Hello, world!\n"));
   TheModule->print(errs(), nullptr);
-  out << "yuc end" << std::endl;
+  std::cout << "yuc end" << std::endl;
 }
 

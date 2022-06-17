@@ -9,7 +9,8 @@ static CNode *gen_expr(Node *node, CNode **ppCur);
 static CNode *gen_addr(Node *node, CNode **ppCur);
 static CType *build_ctype(Type *ty);
 static CNode *new_cnode(Node *node);
-static Ast *buildAst(Obj *obj);
+static Ast *build_ast(Obj *obj);
+static CMember *build_cmember(Member *member);
 
 static int stmt_count = 0;
 static int stmt_level = 0;
@@ -22,6 +23,30 @@ static string buildSeperator(int count, string target) {
   }
   result.append(target);
   return result;
+}
+
+static CMember *build_cmember(Member *member, CMember **ppCur) {
+  if (!member) {
+    *ppCur = NULL;
+    return NULL;
+  }
+  CMember *cur, *temp;
+  cur = new CMember();
+  cur->idx = member->idx;
+  cur->align = member->align;
+  cur->offset = member->offset;
+
+  cur->is_bitfield = member->is_bitfield;
+  cur->bit_offset = member->bit_offset;
+  cur->bit_width = member->bit_offset;
+
+  *ppCur = cur;
+  ppCur = &cur->next;
+  for (Member *n = member->next; n; n = n->next) {
+    temp = build_cmember(n, ppCur);
+    ppCur = &temp->next;
+  }
+  return cur;
 }
 
 static CNode *gen_addr(Node *node, CNode **ppCur) {
@@ -72,6 +97,9 @@ static CType *build_ctype(Type *ty) {
     case TY_INT:
       cout << "TY_INT";
       break;
+    case TY_FUNC:
+      cout << "TY_FUNC";
+      break;
     case TY_ARRAY:
       cout << "TY_ARRAY";
       break;
@@ -104,16 +132,18 @@ static CValue *build_cvalue(Obj *obj) {
 static CNode *new_cnode(Node *node) {
   CNode *cNode = new CNode;
   cNode->kind = static_cast<CNode::CNodeKind>(node->kind);
-  cNode->var = buildAst(node->var);
+  cNode->var = build_ast(node->var);
+  cNode->type = build_ctype(node->ty);
   return cNode;
 }
 
-static Ast *buildAst(Obj *obj) {
+static Ast *build_ast(Obj *obj) {
   if (!obj) {
     return NULL;
   }
   Ast *cur = new Ast;
   cur->name = obj->name;
+  cout << "build_ast, name:" << cur->name << endl;
   cur->is_static = obj->is_static;
   cur->is_function = obj->is_function;
   cur->is_definition = obj->is_definition;
@@ -122,14 +152,17 @@ static Ast *buildAst(Obj *obj) {
   cur->is_local = obj->is_local;
   cur->is_tls = obj->is_tls;
   cur->is_definition = obj->is_definition;
+  cur->type = build_ctype(obj->ty);
+  
   return cur;
 }
 
 static Ast **emit_data(Obj *prog, Ast **ppCur) {
+  cout << "emit_data start" << endl;
   for (Obj *var = prog; var; var = var->next) {
     if (var->is_function || !var->is_definition)
       continue;
-    Ast *cur = buildAst(var);
+    Ast *cur = build_ast(var);
     cout << "global var name: " << var->name << endl;
 
     int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
@@ -139,128 +172,142 @@ static Ast **emit_data(Obj *prog, Ast **ppCur) {
     cur->type = build_ctype(var->ty);
     cur->initializer = build_cvalue(var);
     cur->init_data = var->init_data;
-    cur->is_tls = var->is_tls;
-
     *ppCur = cur;
     ppCur = &cur->next;
    }
+   cout << "emit_data end" << endl;
    return ppCur;
 }
 
-static CNode *gen_expr(Node *node, CNode **ppCur) {
-  int cur_level = ++stmt_level;
-  CNode *curNode = new_cnode(node);
-  *ppCur = curNode;
-  output << buildSeperator(cur_level, "gen_expr start, kind:") 
-  << node->kind <<  endl; 
-  cur_level++;
-  switch(node->kind) {
-    case ND_NULL_EXPR:
-      output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << endl;
-      break;
-    case ND_COMMA:
-      output << buildSeperator(cur_level, "ND_COMMA:") << node->kind << endl;
-      gen_expr(node->lhs, &(*ppCur)->lhs);
-      gen_expr(node->rhs, &(*ppCur)->rhs);
-      break;
-    case ND_COND:
-      output << buildSeperator(cur_level, "ND_COND:") << node->kind << endl;
-      break;
-    case ND_ASSIGN:
-      output << buildSeperator(cur_level, "ND_ASSIGN:") << node->kind << endl;
-      gen_addr(node->lhs, &(*ppCur)->lhs);
-      gen_expr(node->rhs, &(*ppCur)->rhs);
-      if (node->ty->kind == TY_STRUCT || node->ty->kind == TY_UNION) {
 
-      }
-      break;
-    case ND_NUM:
-      output << buildSeperator(cur_level, "ND_NUM:") << node->kind << endl;
-      break;
-    case ND_MEMZERO:
-      output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << endl;
-      break;
-    case ND_VAR:
-      output << buildSeperator(cur_level, "ND_VAR:") << node->kind << endl;
-      break;
-    case ND_CAST:
-      output << buildSeperator(cur_level, "ND_CAST:") << node->kind << endl;
-      gen_expr(node->lhs, ppCur);
-      cast(node->lhs->ty, node->ty);
-      break;
-    case ND_ADD:
-      output << buildSeperator(cur_level, "ND_ADD:") << node->kind << endl;
-      break;
-
+static CNode *gen_cnode(Node *node, CNode **ppCur) {
+  if (!node) {
+    *ppCur = NULL;
+    return NULL;
   }
-  stmt_level--;
-  cur_level--;
-  output << buildSeperator(cur_level, "gen_expr end") << endl; 
-  return curNode;
-}
-
-static CNode *gen_stmt(Node *node, CNode **ppCur) {
   int cur_count = ++stmt_count;
   int level = ++stmt_level;
-  CNode *curNode = new_cnode(node);
+  CNode *curNode, *tmpCNode;
+  curNode = new CNode;
+  curNode->kind = static_cast<CNode::CNodeKind>(node->kind);
+  curNode->type = build_ctype(node->ty);
   *ppCur = curNode;
-  output << buildSeperator(level, "gen_stmt start ==> ") << cur_count << endl;
-  switch(node->kind) {
-    case ND_BLOCK: // 32
-      output << buildSeperator(level+1, "ND_BLOCK:") << ND_BLOCK << "\n"; 
-      ppCur = &(*ppCur)->body;
-      for (Node *n = node->body; n; n = n->next) {
-        CNode *temp = gen_stmt(n, ppCur);
-        ppCur = &temp->next;
-      }
-      break;
-    case ND_RETURN: // 26
-      output << buildSeperator(level+1, "ND_RETURN:") << ND_RETURN << "\n"; 
-      if (node->lhs) {
-        Type *ty = node->lhs->ty;
-        curNode->type = build_ctype(ty);
-        ppCur = &(*ppCur)->next;
-        gen_expr(node->lhs, ppCur);
-      }
-      break;
-    case ND_EXPR_STMT: // 38
-      output << buildSeperator(level+1, "ND_EXPR_STMT:")<< ND_EXPR_STMT << endl; 
-      gen_expr(node->lhs, &(*ppCur)->lhs);
-      break;
-    default:
-      output << buildSeperator(level+1, "gen_stmt unknow kind: ") << node->kind << endl;
-      break;
+
+  output << buildSeperator(level, "gen_cnode ==> ") << cur_count
+    << " kind:" << curNode->kind 
+    << " "<< CNode::node_kind_info(curNode->kind) << endl;
+
+  gen_cnode(node->lhs, &curNode->lhs);
+  gen_cnode(node->rhs, &curNode->rhs);
+
+  // ND_IF
+  gen_cnode(node->cond, &curNode->cond);
+  gen_cnode(node->then, &curNode->then);
+  gen_cnode(node->els, &curNode->els);
+
+  // ND_FOR
+  gen_cnode(node->init, &curNode->init);
+  gen_cnode(node->inc, &curNode->inc);
+
+  if (node->brk_label) {
+    curNode->brk_label = node->brk_label;
   }
-  output << buildSeperator(level, "gen_stmt end <<<=== ") <<  cur_count << endl;
+  if (node->cont_label) {
+    curNode->cont_label = node->cont_label;
+  }
+  
+  // ND_BLOCK
+  ppCur = &curNode->body;
+  for (Node *n = node->body; n; n = n->next) {
+    tmpCNode = gen_cnode(n, ppCur);
+    ppCur = &tmpCNode->next;
+  }
+
+  // ND_SWITCH
+  ppCur = &curNode->case_next;
+  for (Node *n = node->case_next; n; n = n->case_next) {
+    tmpCNode = gen_cnode(n, ppCur);
+    ppCur = &tmpCNode->case_next;
+  }
+  gen_cnode(node->default_case, &curNode->default_case);
+
+  // Case
+  curNode->begin = node->begin;
+  curNode->end = node->end;
+
+  // ND_MEMBER
+  build_cmember(node->member, &curNode->member);
+
+  // Function call
+  curNode->func_ty = build_ctype(node->func_ty);
+  ppCur = &curNode->args;
+  for (Node *arg = node->args; arg; arg = arg->next) {
+    tmpCNode = gen_cnode(arg, ppCur);
+    ppCur = &tmpCNode->next;
+  }
+  curNode->pass_by_stack = node->pass_by_stack;
+  curNode->ret_buffer = build_ast(node->ret_buffer);
+
+  // ND_GOTO
+  if (node->label) {
+    curNode->label = node->label;
+  }
+  if (node->unique_label) {
+    curNode->unique_label = node->unique_label;
+  }
+  gen_cnode(node->goto_next, &curNode->goto_next); 
+
+  // ND_ASM
+  if (node->asm_str) {
+    curNode->asm_str = node->asm_str;
+  }
+
+  // Atomic compare-and-swap
+  gen_cnode(node->cas_addr, &curNode->cas_addr);
+  gen_cnode(node->cas_old, &curNode->cas_old);
+  gen_cnode(node->cas_new, &curNode->cas_new);
+
+  // Atomic op= operators
+  curNode->atomic_addr = build_ast(node->atomic_addr);
+  gen_cnode(node->atomic_expr, &curNode->atomic_expr);
+
+  // Variable
+  curNode->var = build_ast(node->var);
+
+  // Numeric literal
+  curNode->fval = node->fval;
+  curNode->val = node->val;
+
+  output << buildSeperator(level, "gen_cnode end <<<=== ") <<  cur_count << endl;
   --stmt_level;
   return curNode;
 }
 
+
 static Ast **emit_text(Obj *prog, Ast **ppCur) {
+  output << "emit_text start" << endl;
   for (Obj *fn = prog; fn; fn = fn->next) {
     if (!fn->is_function || !fn->is_definition)
       continue;
     if (!fn->is_live)
       continue;
     output << "\nemit_text, fn name:"<< fn->name << "\n"; 
-    Ast *cur = buildAst(fn);
+    Ast *cur = build_ast(fn);
     Ast **pParam = &cur->params;
 
     for (Obj *var = fn->params; var; var = var->next) {
-
-      Ast *param = new Ast();
-      param->name = var->name;
-      param->type = build_ctype(var->ty);
-
+      Ast *param = build_ast(var);
       *pParam = param;
       pParam = &param->next; 
     }
     stmt_count = 0;
-    gen_stmt(fn->body, &cur->body);
+    stmt_level = 0;
+    gen_cnode(fn->body, &cur->body);
     
     *ppCur = cur;
     ppCur = &cur->next;
   }
+  output << "emit_text end" << endl;
   return ppCur;
 }
 
@@ -270,5 +317,6 @@ void codegen_yuc(Obj *prog, const string file_name) {
   Ast **last;
   last = emit_data(prog, &pHead);
   last = emit_text(prog, last);
+
   ir_gen(pHead, out_put, file_name);
 }
