@@ -5,9 +5,13 @@
 #include "llvm/IR/IRBuilder.h"
 #include "llvm/IR/Verifier.h"
 #include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/Constants.h"
+#include <algorithm>
 
 using namespace llvm;
 using namespace yuc;
+
+static Type *yuc2LLVMType(CType *ctype);
 
 static std::unique_ptr<LLVMContext> TheContext;
 static std::unique_ptr<Module> TheModule;
@@ -16,6 +20,8 @@ static std::unique_ptr<IRBuilder<>> Builder;
 static int stmt_level = 0;
 static int stmt_count = 0;
 static std::ofstream output("./test2/ast_ir.out");
+static std::map<int, Value*> LocallAddress;
+static Constant *buffer2Constatns(CType *ctype, char *buf, int offset);
 
 static string buildSeperator(int count, string target) {
   string result = "";
@@ -118,30 +124,54 @@ static void gen_stmt(CNode *node) {
   --stmt_level;
 }
 
+static llvm::ArrayType *yuc2ArrayType(Ctype *ctype) {
+  Type *base = yuc2LLVMType(ctype->base);
+  int array_len = ctype->array_len;
+  llvm::ArrayType *type = llvm::ArrayType::get(base, array_len);
+  return type;
+}
+
+static Type *yuc2PointerType(Ctype *ctype) {
+  Type *base = yuc2LLVMType(ctype->base);
+  Type *type = PointerType::get(base, 0);
+  return type;
+}
+
+static llvm::StructType *yuc2StructType(Ctype *ctype) {
+  llvm::SmallVector<llvm::Type *, 16> Types;
+  Types.reserve(ctype->memberCount);
+  for (CMember *member = ctype->members; member; member = member->next) {
+    Types.push_back(yuc2LLVMType(member->ty));
+  }
+  llvm::StructType *type = llvm::StructType::get(TheContext, Types);
+  return type;
+}
+
 static Type *yuc2LLVMType(CType *ctype) {
-  cout << "yuc2LLVMType start" << endl;
-  Type *type, *base;
-  int size = ctype->size;
+  cout << "yuc2LLVMType start: "
+      << CType::ctypeKindString(ctype->kind) << endl;
+  Type *type;
   switch (ctype->kind) {
+    case CType::TY_CHAR:
+      type = Builder->getInt8Ty();
+      break;
+    case CType::TY_SHORT:
+      type = Builder->getInt16Ty();
+      break;
     case CType::TY_INT:
-    cout << "IntegerType ";
-      switch(size) {
-        case 4:
-          type = Builder->getInt32Ty();
-          break;
-        case 1:
-          type = Builder->getInt8Ty();
-          break;
-        default:
-          type = Builder->getInt32Ty();
-          break;
-      }
+      type = Builder->getInt32Ty();
+      break;
+    case CType::TY_LONG:
+      type = Builder->getInt64Ty();
       break;
     case CType::TY_PTR:
-      cout << "PointerType ";
-      base = yuc2LLVMType(ctype->base);
-      type = PointerType::get(base, 0);
+      type = yuc2PointerType(ctype);
       break;
+    case CType::TY_ARRAY:
+      type = yuc2ArrayType(ctype);
+      break;
+    case CType::TY_STRUCT:
+      type = yuc2StructType(ctype);
     default:
       type = Builder->getInt32Ty();
       break;
@@ -149,6 +179,78 @@ static Type *yuc2LLVMType(CType *ctype) {
   
   cout << endl;
   return type;
+}
+
+static uint64_t read_buf(char *buf, int sz) {
+  if (sz == 1)
+    return *buf;
+  if (sz == 2)
+    return *(uint16_t *)buf;
+  if (sz == 4)
+    return *(uint32_t *)buf;
+  if (sz == 8)
+    return *(uint64_t *)buf;
+  return *buf;
+}
+
+llvm::Constant *EmitArrayInitialization(CType *ArrayType, char *buf, int offset) {
+  SmallVector<llvm::Constant *, 16> Elts;
+  unsigned NumElements = ArrayType->array_len;
+  Elts.reserve(NumElements);
+  int sz = ArrayType->base->size;
+  for(int i = 0; i < NumElements; i++) {
+    llvm::Constant *C = buffer2Constatns(ArrayType->base, buf, offset + sz * i);
+    Elts.push_back(C);
+  }
+
+  Type *CommonElementType = yuc2LLVMType(ArrayType->base);
+  return llvm::ConstantArray::get(
+        llvm::ArrayType::get(CommonElementType, NumElements), Elts);
+ }
+ 
+llvm::Constant *EmitStructInitialization(CType *StructType, char *buf, int offset) {
+  SmallVector<llvm::Constant *, 16> Elements;
+  unsigned NumElements = StructType->memberCount;
+  Elements.reserve(NumElements);
+  for (CMember *member = StructType->members; member; member = member->next) {
+    Elements.push_back(buffer2Constatns(member->ty, buf, offset + member->offset));
+  }
+
+  llvm::StructType *SType = yuc2StructType(StructType);
+  return llvm::ConstantStruct::get(SType, Elements);
+}  
+
+static Constant *buffer2Constatns(CType *ctype, char *buf, int offset) {
+  Constant *constant;
+  int size = ctype->size;
+  cout << "bufferToConstatns start: "
+    << CType::ctypeKindString(ctype->kind) 
+    << " size: " << size << endl;
+  Type *varType;
+  switch(ctype->kind) {
+    case CType::TY_CHAR:
+    case CType::TY_SHORT:
+    case CType::TY_INT:
+    case CType::TY_LONG:
+      varType = yuc2LLVMType(ctype);
+      constant = llvm::ConstantInt::get(varType, read_buf(buf + offset, size));
+      break;
+    case CType::TY_ARRAY:
+      constant = EmitArrayInitialization(ctype, buf, offset);
+      break;
+    case CType::TY_STRUCT:
+      constant = EmitStructInitialization(ctype, buf, offset);
+      break; 
+    default:
+      constant = Builder->getInt32(-1024);
+      break;
+  }
+  return constant;
+}
+
+static Constant *yuc2Constants(Ast *gvarNode) {
+  Constant *constant = buffer2Constatns(gvarNode->type, gvarNode->init_data, 0);
+  return constant;
 }
 
 static GlobalValue::LinkageTypes yuc2LinkageType(Ast *yucNode) {
@@ -184,38 +286,35 @@ GlobalVariable *createGlobalVar(Ast *yucNode) {
     if (!yucNode->is_static) {
       gVar->setDSOLocal(true);
     }
-    CValue *cvalue = yucNode->initializer;
-    gVar->setInitializer(Builder->getInt32(cvalue->val));
+    Constant *initializer = yuc2Constants(yucNode);
+    gVar->setInitializer(initializer);
+
     gVar->setLinkage(yuc2LinkageType(yucNode));
     return gVar;
 }
 
 static void emit_data(Ast *ast) {
-  for (Ast *var = ast; var; var = var->next) {
-    if (var->is_function || !var->is_definition) {
-      continue;      
-    }
-    std::cout << "emit_data name:" << var->name << endl;
-
-    CType *ctype = var->type;
-    if (ctype->kind != CType::TY_INT) {
-      continue;
-    }
-    createGlobalVar(var);
+  if (!ast) {
+    return;
   }
+  emit_data(ast->next);
+  std::cout << "emit_data name:" << ast->name << endl;
+  createGlobalVar(ast);
 }
 
-static std::vector<Type *> yuc2ParamTypes(Ast *funcNode) {
-  int cur_level = ++stmt_level;
+static FunctionType * buildFunctionType(Ast *funcNode) {
   std::vector<Type *> types;
-  std::cout << buildSeperator(cur_level, "yuc2ParamTypes ")
-     << funcNode->name << std::endl;
-  for (Ast *param = funcNode->params; param; param = param->next) {
-    Type *type = yuc2LLVMType(param->type);
+  CType *funcType = funcNode->type;
+  for (CType *paramType = funcType->params; paramType; paramType = paramType->next) {
+    Type *type = yuc2LLVMType(paramType);
     types.push_back(type);
   }
-  --stmt_level;
-  return types;
+
+  Type *RetTy = yuc2LLVMType(funcType->return_ty);
+  bool isVarArg = funcType->is_variadic;
+
+  FunctionType *functionType = FunctionType::get(RetTy, types, isVarArg);
+  return functionType;
 }
 
 static CNode *getFuntionEnd(CNode *block) {
@@ -231,34 +330,8 @@ static CNode *getFuntionEnd(CNode *block) {
   return NULL;
 }
 
-static Type *yuc2RetType(CNode *block) {
-  CNode *cur = block->body, *retNode = nullptr;
-  while(cur) {
-    if (cur->kind == CNode::CNodeKind::ND_RETURN) {
-      retNode = cur;
-      break;
-    }
-    cur = cur->next;
-  }
-
-  cout << "yuc2RetType last kind:" << CNode::node_kind_info(retNode->kind) << endl;
-  Type *type = yuc2LLVMType(retNode->lhs->type);
-  return type;
-}
-
-static std::vector<std::string> yuc2FuncArgs(Ast *funcNode) {
-  std::vector<std::string> FuncArgs;
-  for (Ast *param = funcNode->params; param; param = param->next) {
-    FuncArgs.push_back(param->name);
-  }
-  return FuncArgs;
-}
-
-Function *createFunc(Ast *funcNode, bool isVarArg = false) {
-  std::vector<Type *> params = yuc2ParamTypes(funcNode);
-  cout << "createFunc params size:" << params.size() << endl;
-  Type *RetTy = yuc2RetType(funcNode->body);
-  FunctionType *funcType = FunctionType::get(RetTy, params, isVarArg);
+Function *createFunc(Ast *funcNode) {
+  FunctionType *funcType = buildFunctionType(funcNode);
   std::string funcName = funcNode->name;
   GlobalValue::LinkageTypes linkageType = yuc2LinkageType(funcNode);
   Function *fooFunc = Function::Create(funcType, linkageType, funcName, TheModule.get());
@@ -276,7 +349,7 @@ void setFuncArgs(Function *Func, std::vector<std::string> FuncArgs) {
     }
 }
 
-static Value *getValue(CNode *node) {
+static Value *getValue(CNode *node, Type *returnType) {
   cout<< "getValue kind:" << CNode::node_kind_info(node->kind) << endl;
   switch(node->kind) {
     case CNode::CNodeKind::ND_NUM:
@@ -286,46 +359,74 @@ static Value *getValue(CNode *node) {
   return NULL;
 }
 
-static void FinishFunction(CNode *end) {
+static void StartFunction(Ast *funcNode) {
+  cout << "StartFunction " << endl;
+}
+
+static void FinishFunction(Function *Func, Ast *funcNode) {
   cout << "FinishFunction " << endl;
+  CNode *end = getFuntionEnd(funcNode->body);
   CNode *ndCast = end->lhs;
-  Type *retType = yuc2LLVMType(ndCast->type);
-  CNode *ndRet = ndCast->lhs;
-  Value *val = getValue(ndRet);
+  Type *returnType = Func->getReturnType();
+  CNode *ndReturn = ndCast->lhs;
+  Value *val = getValue(ndReturn, returnType);
   Builder->CreateRet(val);
 }
 
-static void buildFunctionBody(Function *Func) {
+static void prepareLocals(Function *Func, Ast *funcNode) {
+  cout << "prepareLocals start" << endl;
+  // reverse locals
+  vector <Ast *> locals;
+  for (Ast *local = funcNode->locals; local; local = local->next) {
+    locals.push_back(local);
+  }
+  reverse(locals.begin(), locals.end());
+  // allocal local variables and args
+  for (vector<Ast *>::iterator iter = locals.begin(); iter != locals.end(); iter++) {
+    Ast *local = (*iter);
+    Type *localType = yuc2LLVMType(local->type);
+    Value *localAddr = Builder->CreateAlloca(localType, nullptr);
+    LocallAddress[local->offset] = localAddr;
+  }
+
+  // reverse args
+  vector<Ast *> args;
+  for (Ast *param = funcNode->params; param; param = param->next) {
+    args.push_back(param);
+  }
+  reverse(args.begin(), args.end());
+
+  // store args
+  vector<Ast *>::iterator arg_iter = args.begin();
   Function::arg_iterator AI, AE;
-  std::vector<std::pair<Argument *, Value *>> args;
-  // create alloca arg
-  for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI) {
-    Value *argValue = Builder->CreateAlloca(AI->getType(), nullptr);
-    args.push_back(make_pair(AI, argValue));
+  for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI, arg_iter++) {
+    Value *argAddr = LocallAddress[(*arg_iter)->offset];
+    Builder->CreateStore(AI, argAddr);
   }
-  // create store arg
-  for(auto first = args.begin(); first < args.end(); ++first) {
-    Builder->CreateStore(first->first, first->second);
-  }
+}
+
+static void buildFunctionBody(Function *Func, Ast *funcNode) {
+  BasicBlock *entry = BasicBlock::Create(*TheContext, "", Func);
+  Builder->SetInsertPoint(entry);
+
+  prepareLocals(Func, funcNode);
 }
 
 void buildFunction(Ast *funcNode) {
   cout << "buildFunction " << funcNode->name << endl;
   Function *fooFunc = createFunc(funcNode);
-  BasicBlock *entry = BasicBlock::Create(*TheContext, "", fooFunc);
-  Builder->SetInsertPoint(entry);
-  buildFunctionBody(fooFunc);
-  CNode *end = getFuntionEnd(funcNode->body);
-  FinishFunction(end);
+  StartFunction(funcNode);
+  buildFunctionBody(fooFunc, funcNode);
+  FinishFunction(fooFunc, funcNode);
   verifyFunction(*fooFunc);
 }
 
 static void emit_text(Ast *ast) {
-  for (Ast *fn = ast; fn; fn = fn->next) {
-    if (!fn->is_function || !fn->is_definition)
-      continue;
-    buildFunction(fn);
+  Ast *fn = ast;
+  if (!fn ||!fn->is_function || !fn->is_definition) {
+    return;
   }
+  buildFunction(fn);
 }
 
 void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {

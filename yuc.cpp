@@ -4,13 +4,10 @@
 using namespace yuc;
 using namespace std;
 
-static CNode *gen_stmt(Node *node, CNode **ppCur);
-static CNode *gen_expr(Node *node, CNode **ppCur);
-static CNode *gen_addr(Node *node, CNode **ppCur);
 static CType *build_ctype(Type *ty);
-static CNode *new_cnode(Node *node);
 static Ast *build_ast(Obj *obj);
-static CMember *build_cmember(Member *member);
+static CMember *build_cmember(Member *member, CMember **ppCur);
+static CNode *gen_cnode(Node *node, CNode **ppCur);
 
 static int stmt_count = 0;
 static int stmt_level = 0;
@@ -30,7 +27,7 @@ static CMember *build_cmember(Member *member, CMember **ppCur) {
     *ppCur = NULL;
     return NULL;
   }
-  CMember *cur, *temp;
+  CMember *cur;
   cur = new CMember();
   cur->idx = member->idx;
   cur->align = member->align;
@@ -40,37 +37,8 @@ static CMember *build_cmember(Member *member, CMember **ppCur) {
   cur->bit_offset = member->bit_offset;
   cur->bit_width = member->bit_offset;
 
-  *ppCur = cur;
-  ppCur = &cur->next;
-  for (Member *n = member->next; n; n = n->next) {
-    temp = build_cmember(n, ppCur);
-    ppCur = &temp->next;
-  }
+  build_cmember(member->next, &cur->next);
   return cur;
-}
-
-static CNode *gen_addr(Node *node, CNode **ppCur) {
-  CNode *curNode = new_cnode(node);
-  *ppCur = curNode;
-  int cur_level = ++stmt_level;
-  output << buildSeperator(cur_level, "gen_addr")
-      << " node kind:" << node->kind << endl;
-  cur_level++;
-  curNode->type = build_ctype(node->ty);
-  switch(node->kind) {
-    case ND_VAR:
-      output << buildSeperator(cur_level, "ND_VAR:") << node->kind << endl;
-      break;
-  }
-  --stmt_level;
-  return curNode;
-}
-
-static void cast(Type *from, Type *to) {
-  int cur_level = ++stmt_level;
-  output << buildSeperator(cur_level, "cast")
-      << " from:" << from->kind << " to:" << to->kind << endl; 
-  --stmt_level;
 }
 
 static CType *build_ctype(Type *ty) {
@@ -79,62 +47,32 @@ static CType *build_ctype(Type *ty) {
   }
   CType *ctype = new CType();
   ctype->size = ty->size;
+  ctype->align = ty->align;
   ctype->is_unsigned = ty->is_unsigned;
-  TypeKind kind = ty->kind;
-  cout << "build ctype size " << ty->size
-      << " kind " << kind << ": ";
+  ctype->is_atomic = ty->is_atomic;
   ctype->kind = static_cast<CType::CTypeKind>(ty->kind);
-  switch(kind) {
-    case TY_STRUCT:
-      cout << "TY_STRUCT";
-      break;
-      case TY_VOID:
-      cout << "TY_VOID";
-      break;
-    case TY_CHAR:
-      cout << "TY_CHAR";
-      break;
-    case TY_INT:
-      cout << "TY_INT";
-      break;
-    case TY_FUNC:
-      cout << "TY_FUNC";
-      break;
-    case TY_ARRAY:
-      cout << "TY_ARRAY";
-      break;
-    case TY_PTR:
-      cout << "TY_PTR, pointer base \n";
-      ctype->base = build_ctype(ty->base);
-      break;
-    default:
-      cerr << "unknow type kind: " << kind << endl;
-      break;
+  ctype->origin = build_ctype(ty->origin);
+  ctype->base = build_ctype(ty->base);
+  ctype->array_len = ty->array_len;
+
+  gen_cnode(ty->vla_len, &ctype->vla_len);
+  ctype->vla_size = build_ast(ty->vla_size);
+
+  build_cmember(ty->members, &ctype->members);
+  int memberCount = 0;
+  for (Member *member = ty->members; member; member = member->next) {
+    memberCount++;
   }
-  cout << endl;
+  ctype->memberCount = memberCount;
+  ctype->is_flexible = ty->is_flexible;
+  ctype->is_packed = ty->is_packed;
+
+  ctype->return_ty = build_ctype(ty->return_ty);
+  ctype->params = build_ctype(ty->params);
+  ctype->is_variadic = ty->is_variadic;
+  ctype->next = build_ctype(ty->next);
+
   return ctype;
-}
-
-static CValue *build_cvalue(Obj *obj) {
-  CValue *cvalue = new CValue();
-  Type *ty = obj->ty;
-  int val;
-  switch(ty->kind) {
-    case TY_INT:
-      val = *(int *)obj->init_data;
-      cvalue->val = val;
-      break;
-  }
-
-  return cvalue;
-}
-
-static CNode *new_cnode(Node *node) {
-  CNode *cNode = new CNode;
-  cNode->kind = static_cast<CNode::CNodeKind>(node->kind);
-  cNode->var = build_ast(node->var);
-  cNode->type = build_ctype(node->ty);
-  return cNode;
 }
 
 static Ast *build_ast(Obj *obj) {
@@ -144,16 +82,20 @@ static Ast *build_ast(Obj *obj) {
   Ast *cur = new Ast;
   cur->name = obj->name;
   cout << "build_ast, name:" << cur->name << endl;
+  cur->next = build_ast(obj->next);
   cur->is_static = obj->is_static;
   cur->is_function = obj->is_function;
   cur->is_definition = obj->is_definition;
   cur->is_live = obj->is_live;
   cur->is_tentative = obj->is_tentative;
+  cur->init_data = obj->init_data;
   cur->is_local = obj->is_local;
   cur->is_tls = obj->is_tls;
   cur->is_definition = obj->is_definition;
+  cur->offset = obj->offset;
   cur->type = build_ctype(obj->ty);
-  
+  cur->locals = build_ast(obj->locals);
+  cur->params = build_ast(obj->params);
   return cur;
 }
 
@@ -170,8 +112,6 @@ static Ast **emit_data(Obj *prog, Ast **ppCur) {
 
     cur->align = align;
     cur->type = build_ctype(var->ty);
-    cur->initializer = build_cvalue(var);
-    cur->init_data = var->init_data;
     *ppCur = cur;
     ppCur = &cur->next;
    }
@@ -293,13 +233,7 @@ static Ast **emit_text(Obj *prog, Ast **ppCur) {
       continue;
     output << "\nemit_text, fn name:"<< fn->name << "\n"; 
     Ast *cur = build_ast(fn);
-    Ast **pParam = &cur->params;
 
-    for (Obj *var = fn->params; var; var = var->next) {
-      Ast *param = build_ast(var);
-      *pParam = param;
-      pParam = &param->next; 
-    }
     stmt_count = 0;
     stmt_level = 0;
     gen_cnode(fn->body, &cur->body);

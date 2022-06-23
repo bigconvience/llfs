@@ -42,7 +42,6 @@ typedef class CToken CToken;
 	  bool is_tls;
 	  char *init_data;
 	  CRelocation *rel;
-	  CValue *initializer;
 
 	  // Function
 	  bool is_inline;
@@ -110,6 +109,7 @@ typedef class CToken CToken;
 		
 		CTypeKind kind;
 		int size;
+		int align;
 		bool is_unsigned;
 		bool is_atomic;
 		CType *origin;
@@ -119,6 +119,8 @@ typedef class CToken CToken;
 		CNode *vla_len;
 		Ast *vla_size;
 
+		CMember *members;
+		int memberCount;
 		bool is_flexible;
 		bool is_packed;
 
@@ -127,6 +129,64 @@ typedef class CToken CToken;
 		CType *params;
 		bool is_variadic;
 		CType *next;
+
+		static string ctypeKindString(CTypeKind kind) {
+			string kindStr;
+			switch(kind) {
+				case TY_VOID:
+				  kindStr = "TY_VOID";
+				  break;
+				case TY_BOOL:
+				  kindStr = "TY_BOOL";
+				  break;
+				case TY_CHAR:
+				  kindStr = "TY_CHAR";
+				  break;
+				case TY_SHORT:
+				  kindStr = "TY_SHORT";
+				  break;
+				case TY_INT:
+				  kindStr = "TY_INT";
+				  break;
+				case TY_LONG:
+				  kindStr = "TY_LONG";
+				  break;
+				case TY_FLOAT:
+				  kindStr = "TY_FLOAT";
+				  break;
+				case TY_DOUBLE:
+				  kindStr = "TY_DOUBLE";
+				  break;
+				case TY_LDOUBLE:
+				  kindStr = "TY_LDOUBLE";
+				  break;
+				case TY_ENUM:
+				  kindStr = "TY_ENUM";
+				  break;
+				case TY_PTR:
+				  kindStr = "TY_PTR";
+				  break;
+				case TY_FUNC:
+				  kindStr = "TY_FUNC";
+				  break;
+				case TY_ARRAY:
+				  kindStr = "TY_ARRAY";
+				  break;
+				case TY_VLA:
+				  kindStr = "TY_VLA";
+				  break;
+				case TY_STRUCT:
+				  kindStr = "TY_STRUCT";
+				  break;
+				case TY_UNION:
+				  kindStr = "TY_UNION";
+				  break;
+				default:
+				  kindStr = "unknow type kind";
+				  break;
+				}
+			return kindStr;
+		}
 	};
 
 	class CNode {
