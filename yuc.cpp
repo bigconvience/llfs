@@ -6,7 +6,7 @@ using namespace std;
 
 static CType *build_ctype(Type *ty);
 static Ast *build_ast(Obj *obj);
-static CMember *build_cmember(Member *member, CMember **ppCur);
+static CMember *build_cmember(Member *member);
 static CNode *gen_cnode(Node *node, CNode **ppCur);
 
 static int stmt_count = 0;
@@ -22,13 +22,13 @@ static string buildSeperator(int count, string target) {
   return result;
 }
 
-static CMember *build_cmember(Member *member, CMember **ppCur) {
+static CMember *build_cmember(Member *member) {
   if (!member) {
-    *ppCur = NULL;
     return NULL;
   }
   CMember *cur;
   cur = new CMember();
+  cur->ty = build_ctype(member->ty);
   cur->idx = member->idx;
   cur->align = member->align;
   cur->offset = member->offset;
@@ -37,7 +37,6 @@ static CMember *build_cmember(Member *member, CMember **ppCur) {
   cur->bit_offset = member->bit_offset;
   cur->bit_width = member->bit_offset;
 
-  build_cmember(member->next, &cur->next);
   return cur;
 }
 
@@ -58,10 +57,12 @@ static CType *build_ctype(Type *ty) {
   gen_cnode(ty->vla_len, &ctype->vla_len);
   ctype->vla_size = build_ast(ty->vla_size);
 
-  build_cmember(ty->members, &ctype->members);
   int memberCount = 0;
+  CMember **ppMem = &ctype->members;
   for (Member *member = ty->members; member; member = member->next) {
     memberCount++;
+    *ppMem = build_cmember(member);
+    ppMem = &(*ppMem)->next;
   }
   ctype->memberCount = memberCount;
   ctype->is_flexible = ty->is_flexible;
@@ -176,7 +177,7 @@ static CNode *gen_cnode(Node *node, CNode **ppCur) {
   curNode->end = node->end;
 
   // ND_MEMBER
-  build_cmember(node->member, &curNode->member);
+  curNode->member = build_cmember(node->member);
 
   // Function call
   curNode->func_ty = build_ctype(node->func_ty);

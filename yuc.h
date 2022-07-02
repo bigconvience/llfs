@@ -176,10 +176,10 @@ typedef class CToken CToken;
 				  kindStr = "TY_VLA";
 				  break;
 				case TY_STRUCT:
-				  kindStr = "TY_STRUCT";
+				  kindStr = "struct";
 				  break;
 				case TY_UNION:
-				  kindStr = "TY_UNION";
+				  kindStr = "union";
 				  break;
 				default:
 				  kindStr = "unknow type kind";

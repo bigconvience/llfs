@@ -6,6 +6,8 @@
 #include "llvm/IR/Verifier.h"
 #include "llvm/IR/GlobalValue.h"
 #include "llvm/IR/Constants.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringRef.h"
 #include <algorithm>
 
 using namespace llvm;
@@ -21,7 +23,11 @@ static int stmt_level = 0;
 static int stmt_count = 0;
 static std::ofstream output("./test2/ast_ir.out");
 static std::map<int, Value*> LocallAddress;
-static Constant *buffer2Constatns(CType *ctype, char *buf, int offset);
+static Constant *buffer2Constants(Type *Ty, CType *ctype, char *buf, int offset);
+
+static LLVMContext &getLLVMContext() {
+  return *TheContext;
+}
 
 static string buildSeperator(int count, string target) {
   string result = "";
@@ -124,27 +130,62 @@ static void gen_stmt(CNode *node) {
   --stmt_level;
 }
 
-static llvm::ArrayType *yuc2ArrayType(Ctype *ctype) {
+static void ComputeRecordLayout(CType *ctype, llvm::StructType *Ty) {
+  cout << "ComputeRecordLayout" << endl;
+  llvm::SmallVector<llvm::Type *, 16> Types;
+  Types.reserve(ctype->memberCount);
+  for (CMember *member = ctype->members; member; member = member->next) {
+    Types.push_back(yuc2LLVMType(member->ty));
+  }
+  Ty->setBody(Types);
+}
+
+static llvm::ArrayType *yuc2ArrayType(CType *ctype) {
   Type *base = yuc2LLVMType(ctype->base);
   int array_len = ctype->array_len;
   llvm::ArrayType *type = llvm::ArrayType::get(base, array_len);
   return type;
 }
 
-static Type *yuc2PointerType(Ctype *ctype) {
+static Type *yuc2PointerType(CType *ctype) {
   Type *base = yuc2LLVMType(ctype->base);
   Type *type = PointerType::get(base, 0);
   return type;
 }
 
-static llvm::StructType *yuc2StructType(Ctype *ctype) {
+static llvm::StructType *yuc2StructType(CType *ctype) {
+  cout << "yuc2StructType" << endl;
   llvm::SmallVector<llvm::Type *, 16> Types;
   Types.reserve(ctype->memberCount);
   for (CMember *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
-  llvm::StructType *type = llvm::StructType::get(TheContext, Types);
+  llvm::StructType *type = llvm::StructType::get(*TheContext, Types, true);
   return type;
+}
+
+void addRecordTypeName(CType *ctype, llvm::StructType *Ty, StringRef suffix) {
+  SmallString<256> TypeName;
+  llvm::raw_svector_ostream OS(TypeName);
+  string kindName = CType::ctypeKindString(ctype->kind);
+  OS << kindName << ".";
+
+  OS << "anon";
+  if (!suffix.empty()) {
+    OS << suffix;
+  }
+  Ty->setName(OS.str());
+}
+
+static llvm::StructType *ConvertRecordDeclType(CType *ctype) {
+  cout << "ConvertRecordDeclType" << endl;
+
+  llvm::StructType *Entry = llvm::StructType::create(getLLVMContext());
+  addRecordTypeName(ctype, Entry, "");
+
+  llvm::StructType *Ty = Entry;
+  ComputeRecordLayout(ctype, Ty);
+  return Ty;
 }
 
 static Type *yuc2LLVMType(CType *ctype) {
@@ -170,14 +211,14 @@ static Type *yuc2LLVMType(CType *ctype) {
     case CType::TY_ARRAY:
       type = yuc2ArrayType(ctype);
       break;
+    case CType::TY_UNION:
     case CType::TY_STRUCT:
-      type = yuc2StructType(ctype);
+      type = ConvertRecordDeclType(ctype);
+      break;
     default:
       type = Builder->getInt32Ty();
       break;
   }
-  
-  cout << endl;
   return type;
 }
 
@@ -193,53 +234,51 @@ static uint64_t read_buf(char *buf, int sz) {
   return *buf;
 }
 
-llvm::Constant *EmitArrayInitialization(CType *ArrayType, char *buf, int offset) {
+llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, CType *ArrayType, char *buf, int offset) {
   SmallVector<llvm::Constant *, 16> Elts;
   unsigned NumElements = ArrayType->array_len;
   Elts.reserve(NumElements);
   int sz = ArrayType->base->size;
+  Type *CommonElementType = Ty->getElementType();
+  CType *baseTy = ArrayType->base;
   for(int i = 0; i < NumElements; i++) {
-    llvm::Constant *C = buffer2Constatns(ArrayType->base, buf, offset + sz * i);
+    llvm::Constant *C = buffer2Constants(CommonElementType, baseTy, buf, offset + sz * i);
     Elts.push_back(C);
   }
 
-  Type *CommonElementType = yuc2LLVMType(ArrayType->base);
   return llvm::ConstantArray::get(
         llvm::ArrayType::get(CommonElementType, NumElements), Elts);
  }
  
-llvm::Constant *EmitStructInitialization(CType *StructType, char *buf, int offset) {
+llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, CType *ctype, char *buf, int offset) {
   SmallVector<llvm::Constant *, 16> Elements;
-  unsigned NumElements = StructType->memberCount;
+  unsigned NumElements = ctype->memberCount;
   Elements.reserve(NumElements);
-  for (CMember *member = StructType->members; member; member = member->next) {
-    Elements.push_back(buffer2Constatns(member->ty, buf, offset + member->offset));
+  for (CMember *member = ctype->members; member; member = member->next) {
+    Type *Ty = yuc2LLVMType(member->ty);
+    llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, buf, offset + member->offset);
+    Elements.push_back(constantValue);
   }
 
-  llvm::StructType *SType = yuc2StructType(StructType);
-  return llvm::ConstantStruct::get(SType, Elements);
+  return llvm::ConstantStruct::get(Ty, Elements);
 }  
 
-static Constant *buffer2Constatns(CType *ctype, char *buf, int offset) {
+static Constant *buffer2Constants(Type *varType, CType *ctype, char *buf, int offset) {
   Constant *constant;
   int size = ctype->size;
-  cout << "bufferToConstatns start: "
-    << CType::ctypeKindString(ctype->kind) 
-    << " size: " << size << endl;
-  Type *varType;
   switch(ctype->kind) {
     case CType::TY_CHAR:
     case CType::TY_SHORT:
     case CType::TY_INT:
     case CType::TY_LONG:
-      varType = yuc2LLVMType(ctype);
       constant = llvm::ConstantInt::get(varType, read_buf(buf + offset, size));
       break;
     case CType::TY_ARRAY:
-      constant = EmitArrayInitialization(ctype, buf, offset);
+      constant = EmitArrayInitialization(static_cast<llvm::ArrayType *>(varType),ctype, buf, offset);
       break;
+    case CType::TY_UNION:
     case CType::TY_STRUCT:
-      constant = EmitStructInitialization(ctype, buf, offset);
+      constant = EmitRecordInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
       break; 
     default:
       constant = Builder->getInt32(-1024);
@@ -248,8 +287,8 @@ static Constant *buffer2Constatns(CType *ctype, char *buf, int offset) {
   return constant;
 }
 
-static Constant *yuc2Constants(Ast *gvarNode) {
-  Constant *constant = buffer2Constatns(gvarNode->type, gvarNode->init_data, 0);
+static Constant *yuc2Constants(Type *Ty, Ast *gvarNode) {
+  Constant *constant = buffer2Constants(Ty, gvarNode->type, gvarNode->init_data, 0);
   return constant;
 }
 
@@ -286,7 +325,7 @@ GlobalVariable *createGlobalVar(Ast *yucNode) {
     if (!yucNode->is_static) {
       gVar->setDSOLocal(true);
     }
-    Constant *initializer = yuc2Constants(yucNode);
+    Constant *initializer = yuc2Constants(type, yucNode);
     gVar->setInitializer(initializer);
 
     gVar->setLinkage(yuc2LinkageType(yucNode));

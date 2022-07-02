@@ -8,6 +8,7 @@ Build a simple C compiler based on [chibicc cpp version](https://github.com/bigc
 
 clang hello.c -o a.out
 clang -emit-llvm -S hello.c -o hello.ll
+clang -Xclang -ast-dump -c initializer.c
 
 clang++ hello.cpp -o a.out
 clang++ -emit-llvm -S hello.cpp -o hello.ll
@@ -19,5 +20,3 @@ llvm-dis hello.bc -o hello.ll
 llc hello.ll -o hello.s
 
 lli hello.ll
-
-
