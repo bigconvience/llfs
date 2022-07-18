@@ -234,6 +234,14 @@ static uint64_t read_buf(char *buf, int sz) {
   return *buf;
 }
 
+llvm::Constant *getPadding(int PadSize) {
+  llvm::Type *Ty = Builder->getInt8Ty();
+  if (PadSize > 1) {
+    Ty = llvm::ArrayType::get(Ty, PadSize);
+  }
+  return llvm::UndefValue::get(Ty);
+}
+
 llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, CType *ArrayType, char *buf, int offset) {
   SmallVector<llvm::Constant *, 16> Elts;
   unsigned NumElements = ArrayType->array_len;
@@ -263,6 +271,31 @@ llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, CType *ctype, cha
   return llvm::ConstantStruct::get(Ty, Elements);
 }  
 
+llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, CType *ctype, char *buf, int offset) {
+  int DesiredSize = ctype->size;
+  int AlignedSize = ctype->align; 
+  SmallVector<llvm::Constant *, 16> Elements;
+  unsigned NumElements = ctype->memberCount;
+  std::cout << "union NumElements： " << NumElements 
+    << " DesiredSize: " <<  DesiredSize
+    << " AlignedSize: " <<  AlignedSize 
+    << endl;
+  Elements.reserve(NumElements);
+  CMember *member = ctype->union_field;
+  if (member) {
+    int Size = member->ty->size;
+    std::cout << "union Size " << Size << endl;
+    Type *Ty = yuc2LLVMType(member->ty);
+    llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, buf, offset + member->offset);
+    Elements.push_back(constantValue);
+    if (DesiredSize > AlignedSize) {
+      Elements.push_back(getPadding(DesiredSize - Size));
+    }
+  }
+
+  return llvm::ConstantStruct::get(Ty, Elements);
+}  
+
 static Constant *buffer2Constants(Type *varType, CType *ctype, char *buf, int offset) {
   Constant *constant;
   int size = ctype->size;
@@ -277,6 +310,8 @@ static Constant *buffer2Constants(Type *varType, CType *ctype, char *buf, int of
       constant = EmitArrayInitialization(static_cast<llvm::ArrayType *>(varType),ctype, buf, offset);
       break;
     case CType::TY_UNION:
+      constant = EmitUnionInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
+      break;
     case CType::TY_STRUCT:
       constant = EmitRecordInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
       break; 

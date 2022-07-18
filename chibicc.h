@@ -359,6 +359,9 @@ struct Type {
   Type *params;
   bool is_variadic;
   Type *next;
+
+  // Union field
+  Member *union_field;
 };
 
 // Struct member

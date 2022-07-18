@@ -5,6 +5,7 @@
 #include <fstream>
 #include <iostream>
 #include <vector>
+#include <map>
 using namespace std;
 
 namespace yuc {
@@ -124,11 +125,17 @@ typedef class CToken CToken;
 		bool is_flexible;
 		bool is_packed;
 
+		// union initialized member
+		CMember *unionMember;
+
 		// Function type
 		CType *return_ty;
 		CType *params;
 		bool is_variadic;
 		CType *next;
+
+		// Union field
+  	CMember *union_field;
 
 		static string ctypeKindString(CTypeKind kind) {
 			string kindStr;

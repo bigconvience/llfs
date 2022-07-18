@@ -1,0 +1,1 @@
+union { int a; char b[4]; } g50 = {.b[2]=0x12};

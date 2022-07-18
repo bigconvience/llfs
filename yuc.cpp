@@ -72,7 +72,7 @@ static CType *build_ctype(Type *ty) {
   ctype->params = build_ctype(ty->params);
   ctype->is_variadic = ty->is_variadic;
   ctype->next = build_ctype(ty->next);
-
+  ctype->union_field = build_cmember(ty->union_field);
   return ctype;
 }
 

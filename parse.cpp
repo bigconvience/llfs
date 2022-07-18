@@ -1491,6 +1491,7 @@ static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
   write_gvar_data(&head, init, var->ty, buf, 0);
   var->init_data = buf;
   var->rel = head.next;
+  var->ty->union_field = init->mem;
 }
 
 // Returns true if a given token represents a type.
