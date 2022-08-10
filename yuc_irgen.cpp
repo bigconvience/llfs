@@ -134,6 +134,13 @@ static void ComputeRecordLayout(CType *ctype, llvm::StructType *Ty) {
   cout << "ComputeRecordLayout" << endl;
   llvm::SmallVector<llvm::Type *, 16> Types;
   Types.reserve(ctype->memberCount);
+  CMember *member = ctype->union_field;
+  if (member) {
+    Types.push_back(yuc2LLVMType(member->ty));
+    Ty->setBody(Types);
+    return;
+  }
+  
   for (CMember *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
