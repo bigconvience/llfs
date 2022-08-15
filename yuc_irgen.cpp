@@ -167,7 +167,7 @@ static llvm::StructType *yuc2StructType(CType *ctype) {
   for (CMember *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
-  llvm::StructType *type = llvm::StructType::get(*TheContext, Types, true);
+  llvm::StructType *type = llvm::StructType::get(*TheContext, Types, false);
   return type;
 }
 
@@ -187,7 +187,7 @@ void addRecordTypeName(CType *ctype, llvm::StructType *Ty, StringRef suffix) {
 static llvm::StructType *ConvertRecordDeclType(CType *ctype) {
   cout << "ConvertRecordDeclType" << endl;
 
-  llvm::StructType *Entry = llvm::StructType::create(getLLVMContext());
+  llvm::StructType *Entry = yuc2StructType(ctype);
   addRecordTypeName(ctype, Entry, "");
 
   llvm::StructType *Ty = Entry;
@@ -361,6 +361,8 @@ GlobalVariable *createGlobalVar(Ast *yucNode) {
     CType *ctype = yucNode->type;
     std::cout << "createGlobalVar kind:" << ctype->kind << endl;
     Type *type = yuc2LLVMType(yucNode->type);
+    // llvm::StructType *Entry = llvm::StructType::get(getLLVMContext());
+    // llvm::StructType *type = Entry;
     TheModule->getOrInsertGlobal(name, type);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
     gVar->setAlignment(MaybeAlign(yucNode->align));
