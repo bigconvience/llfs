@@ -23,7 +23,20 @@ static int stmt_level = 0;
 static int stmt_count = 0;
 static std::ofstream output("./test2/ast_ir.out");
 static std::map<int, Value*> LocallAddress;
-static Constant *buffer2Constants(Type *Ty, CType *ctype, char *buf, int offset);
+static Constant *buffer2Constants(Type *Ty, CType *ctype, CRelocation *rel, char *buf, int offset);
+
+llvm::Type *getPaddingType(int PadSize) {
+  llvm::Type *Ty = Builder->getInt8Ty();
+  if (PadSize > 1) {
+    Ty = llvm::ArrayType::get(Ty, PadSize);
+  }
+  return Ty;
+}
+
+llvm::Constant *getPadding(int PadSize) {
+  llvm::Type *Ty = getPaddingType(PadSize);
+  return llvm::UndefValue::get(Ty);
+}
 
 static LLVMContext &getLLVMContext() {
   return *TheContext;
@@ -164,10 +177,36 @@ static llvm::StructType *yuc2StructType(CType *ctype) {
   cout << "yuc2StructType" << endl;
   llvm::SmallVector<llvm::Type *, 16> Types;
   Types.reserve(ctype->memberCount);
+  CMember *member = ctype->union_field;
+  llvm::StructType *type;
+  int DesiredSize = ctype->size;
+  cout << "yuc2StructType DesiredSize:" << DesiredSize << endl;
+  // union
+  if (member) {
+    int Size = member->ty->size;
+    cout << "union member idx: " << member->idx << " size: " << Size << endl;
+    
+    Types.push_back(yuc2LLVMType(member->ty));
+    if (DesiredSize > Size) {
+      int PadSize = DesiredSize - Size;
+      cout << "PadSize: " << PadSize << endl;
+      llvm::Type *paddingType = getPaddingType(PadSize);
+      Types.push_back(paddingType);
+    }
+
+    if (member->idx) {
+      type = llvm::StructType::get(*TheContext, Types, false);
+    } else {
+      type = llvm::StructType::create(*TheContext, Types, "", false);
+    }
+    cout << "final type: " << Types.size() << endl;
+    return type;
+  }
+  // struct
   for (CMember *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
-  llvm::StructType *type = llvm::StructType::get(*TheContext, Types, false);
+  type = llvm::StructType::create(*TheContext, Types, "", false);
   return type;
 }
 
@@ -186,13 +225,9 @@ void addRecordTypeName(CType *ctype, llvm::StructType *Ty, StringRef suffix) {
 
 static llvm::StructType *ConvertRecordDeclType(CType *ctype) {
   cout << "ConvertRecordDeclType" << endl;
-
-  llvm::StructType *Entry = yuc2StructType(ctype);
-  addRecordTypeName(ctype, Entry, "");
-
-  llvm::StructType *Ty = Entry;
-  ComputeRecordLayout(ctype, Ty);
-  return Ty;
+  llvm::StructType *DesiredType = yuc2StructType(ctype);
+  addRecordTypeName(ctype, DesiredType, "");
+  return DesiredType;
 }
 
 static Type *yuc2LLVMType(CType *ctype) {
@@ -241,23 +276,20 @@ static uint64_t read_buf(char *buf, int sz) {
   return *buf;
 }
 
-llvm::Constant *getPadding(int PadSize) {
-  llvm::Type *Ty = Builder->getInt8Ty();
-  if (PadSize > 1) {
-    Ty = llvm::ArrayType::get(Ty, PadSize);
-  }
-  return llvm::UndefValue::get(Ty);
-}
-
 llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, CType *ArrayType, char *buf, int offset) {
   SmallVector<llvm::Constant *, 16> Elts;
   unsigned NumElements = ArrayType->array_len;
   Elts.reserve(NumElements);
   int sz = ArrayType->base->size;
+
+  std::cout << "EmitArrayInitialization： " << NumElements 
+    << " sz: " <<  sz
+    << endl;
+  
   Type *CommonElementType = Ty->getElementType();
   CType *baseTy = ArrayType->base;
   for(int i = 0; i < NumElements; i++) {
-    llvm::Constant *C = buffer2Constants(CommonElementType, baseTy, buf, offset + sz * i);
+    llvm::Constant *C = buffer2Constants(CommonElementType, baseTy, NULL, buf, offset + sz * i);
     Elts.push_back(C);
   }
 
@@ -269,9 +301,11 @@ llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, CType *ctype, cha
   SmallVector<llvm::Constant *, 16> Elements;
   unsigned NumElements = ctype->memberCount;
   Elements.reserve(NumElements);
+  std::cout << "EmitRecordInitialization NumElements： " << NumElements
+    << endl;
   for (CMember *member = ctype->members; member; member = member->next) {
     Type *Ty = yuc2LLVMType(member->ty);
-    llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, buf, offset + member->offset);
+    llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, NULL, buf, offset + member->offset);
     Elements.push_back(constantValue);
   }
 
@@ -283,27 +317,60 @@ llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, CType *ctype, char
   int AlignedSize = ctype->align; 
   SmallVector<llvm::Constant *, 16> Elements;
   unsigned NumElements = ctype->memberCount;
-  std::cout << "union NumElements： " << NumElements 
+  std::cout << "EmitUnionInitialization NumElements： " << NumElements 
     << " DesiredSize: " <<  DesiredSize
     << " AlignedSize: " <<  AlignedSize 
     << endl;
   Elements.reserve(NumElements);
+  bool Packed = false;
   CMember *member = ctype->union_field;
   if (member) {
     int Size = member->ty->size;
-    std::cout << "union Size " << Size << endl;
+    std::cout << "EmitUnionInitialization union Size " << Size << endl;
     Type *Ty = yuc2LLVMType(member->ty);
-    llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, buf, offset + member->offset);
+    llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, NULL, buf, offset + member->offset);
     Elements.push_back(constantValue);
-    if (DesiredSize > AlignedSize) {
+    if (DesiredSize > Size) {
       Elements.push_back(getPadding(DesiredSize - Size));
     }
   }
+  llvm::StructType *STy = llvm::ConstantStruct::getTypeForElements(getLLVMContext(), Elements, Packed);
+  return llvm::ConstantStruct::get(STy, Elements);
+}
 
-  return llvm::ConstantStruct::get(Ty, Elements);
+llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, char *buf, int offset, CRelocation *rel) {
+  cout << "EmitPointerInitialization" << endl;
+  llvm::Constant *Base = nullptr;
+  llvm::Type *BaseValueTy = nullptr;
+
+  llvm::SmallVector<unsigned, 8> Indices;
+  llvm::SmallVector<llvm::Constant*, 8> IndexValues;
+  // Initialize the stack.
+  Indices.push_back(0);
+  IndexValues.push_back(nullptr);
+
+  if (rel) {
+    long addend = rel->addend;
+    Indices.push_back(addend);
+    IndexValues.push_back(nullptr);
+    char **label = rel->label;
+    char *name = *label;
+    cout << "addend: " << addend << " name:" << name << endl;
+    GlobalVariable *global = TheModule->getGlobalVariable(name);
+    Constant *constant = global->getInitializer();
+    Base = global;
+    BaseValueTy = constant->getType();
+  }
+  for (size_t i = Indices.size() - 1; i != size_t(-1); --i) {
+    IndexValues[i] = llvm::ConstantInt::get(Builder->getInt32Ty(), Indices[i]);
+  }
+
+  llvm::Constant *location =
+    llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, Base, IndexValues);
+  return location;
 }  
 
-static Constant *buffer2Constants(Type *varType, CType *ctype, char *buf, int offset) {
+static Constant *buffer2Constants(Type *varType, CType *ctype, CRelocation *rel, char *buf, int offset) {
   Constant *constant;
   int size = ctype->size;
   switch(ctype->kind) {
@@ -322,6 +389,9 @@ static Constant *buffer2Constants(Type *varType, CType *ctype, char *buf, int of
     case CType::TY_STRUCT:
       constant = EmitRecordInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
       break; 
+    case CType::TY_PTR:
+      constant = EmitPointerInitialization(static_cast<llvm::PointerType *>(varType), ctype, buf, offset, rel);
+      break;
     default:
       constant = Builder->getInt32(-1024);
       break;
@@ -330,7 +400,7 @@ static Constant *buffer2Constants(Type *varType, CType *ctype, char *buf, int of
 }
 
 static Constant *yuc2Constants(Type *Ty, Ast *gvarNode) {
-  Constant *constant = buffer2Constants(Ty, gvarNode->type, gvarNode->init_data, 0);
+  Constant *constant = buffer2Constants(Ty, gvarNode->type, gvarNode->rel, gvarNode->init_data, 0);
   return constant;
 }
 
@@ -359,19 +429,18 @@ static void InitializeModule(const string &moduleName) {
 GlobalVariable *createGlobalVar(Ast *yucNode) {
     string name = yucNode->name;
     CType *ctype = yucNode->type;
-    std::cout << "createGlobalVar kind:" << ctype->kind << endl;
-    Type *type = yuc2LLVMType(yucNode->type);
-    // llvm::StructType *Entry = llvm::StructType::get(getLLVMContext());
-    // llvm::StructType *type = Entry;
-    TheModule->getOrInsertGlobal(name, type);
+    std::cout << "\ncreateGlobalVar kind:" << ctype->kind << endl;
+    Type *DesiredType = yuc2LLVMType(yucNode->type);
+    Constant *initializer = yuc2Constants(DesiredType, yucNode);
+
+    TheModule->getOrInsertGlobal(name, DesiredType);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
     gVar->setAlignment(MaybeAlign(yucNode->align));
     if (!yucNode->is_static) {
       gVar->setDSOLocal(true);
     }
-    Constant *initializer = yuc2Constants(type, yucNode);
+    
     gVar->setInitializer(initializer);
-
     gVar->setLinkage(yuc2LinkageType(yucNode));
     return gVar;
 }

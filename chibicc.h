@@ -193,11 +193,11 @@ typedef enum {
   ND_NE,        // !=
   ND_LT,        // <
   ND_LE,        // <=
-  ND_ASSIGN,    // =
+  ND_ASSIGN,    // = 16
   ND_COND,      // ?:
   ND_COMMA,     // ,
   ND_MEMBER,    // . (struct member access)
-  ND_ADDR,      // unary &
+  ND_ADDR,      // unary & 20
   ND_DEREF,     // unary *
   ND_NOT,       // !
   ND_BITNOT,    // ~
@@ -217,7 +217,7 @@ typedef enum {
   ND_FUNCALL,   // Function call
   ND_EXPR_STMT, // Expression statement
   ND_STMT_EXPR, // Statement expression
-  ND_VAR,       // Variable
+  ND_VAR,       // Variable 40
   ND_VLA_PTR,   // VLA designator
   ND_NUM,       // Integer
   ND_CAST,      // Type cast
@@ -312,7 +312,7 @@ typedef enum {
   TY_DOUBLE,
   TY_LDOUBLE,
   TY_ENUM,
-  TY_PTR,
+  TY_PTR, // index 10
   TY_FUNC,
   TY_ARRAY,
   TY_VLA, // variable-length array

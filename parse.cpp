@@ -17,6 +17,7 @@
 // parser.
 
 #include "chibicc.h"
+#include <iostream>
 
 // Scope for local variables, global variables, typedefs
 // or enum constants
@@ -1415,6 +1416,7 @@ static void write_buf(char *buf, uint64_t val, int sz) {
 
 static Relocation *
 write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int offset) {
+  std::cout << "\nwrite_gvar_data " << ty->kind <<std::endl;
   if (ty->kind == TY_ARRAY) {
     int sz = ty->base->size;
     for (int i = 0; i < ty->array_len; i++)
@@ -1485,13 +1487,16 @@ write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int off
 // initializer list contains a non-constant expression.
 static void gvar_initializer(Token **rest, Token *tok, Obj *var) {
   Initializer *init = initializer(rest, tok, var->ty, &var->ty);
+  var->ty->union_field = init->mem;
+  if (init->ty->kind == TY_ARRAY && init->children[0]) {
+    var->ty->base->union_field = init->children[0]->mem;
+  }
 
   Relocation head = {};
   char *buf = (char *)calloc(1, var->ty->size);
   write_gvar_data(&head, init, var->ty, buf, 0);
   var->init_data = buf;
   var->rel = head.next;
-  var->ty->union_field = init->mem;
 }
 
 // Returns true if a given token represents a type.
@@ -1827,6 +1832,7 @@ static Node *expr(Token **rest, Token *tok) {
 }
 
 static int64_t eval(Node *node) {
+  std::cout << "  eval node kind:" << node->kind << std::endl;
   return eval2(node, NULL);
 }
 
@@ -1837,6 +1843,7 @@ static int64_t eval(Node *node) {
 // number. The latter form is accepted only as an initialization
 // expression for a global variable.
 static int64_t eval2(Node *node, char ***label) {
+  std::cout << "eval2 node kind:" << node->kind << " ";
   add_type(node);
 
   if (is_flonum(node->ty))
@@ -1844,10 +1851,12 @@ static int64_t eval2(Node *node, char ***label) {
 
   switch (node->kind) {
   case ND_ADD:
+    std::cout << "ND_ADD" << std::endl;
     return eval2(node->lhs, label) + eval(node->rhs);
   case ND_SUB:
     return eval2(node->lhs, label) - eval(node->rhs);
   case ND_MUL:
+    std::cout << "ND_MUL" << std::endl;
     return eval(node->lhs) * eval(node->rhs);
   case ND_DIV:
     if (node->ty->is_unsigned)
@@ -1896,6 +1905,7 @@ static int64_t eval2(Node *node, char ***label) {
   case ND_LOGOR:
     return eval(node->lhs) || eval(node->rhs);
   case ND_CAST: {
+    std::cout << "ND_CAST" << std::endl;
     int64_t val = eval2(node->lhs, label);
     if (is_integer(node->ty)) {
       switch (node->ty->size) {
@@ -1923,8 +1933,10 @@ static int64_t eval2(Node *node, char ***label) {
     if (node->var->ty->kind != TY_ARRAY && node->var->ty->kind != TY_FUNC)
       error_tok(node->tok, "invalid initializer");
     *label = &node->var->name;
+    std::cout << "ND_VAR label:" << **label << std::endl;
     return 0;
   case ND_NUM:
+    std::cout << "ND_NUM: " << node->val << std::endl;
     return node->val;
   }
 

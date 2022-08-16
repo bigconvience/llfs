@@ -125,9 +125,6 @@ typedef class CToken CToken;
 		bool is_flexible;
 		bool is_packed;
 
-		// union initialized member
-		CMember *unionMember;
-
 		// Function type
 		CType *return_ty;
 		CType *params;
@@ -430,6 +427,14 @@ typedef class CToken CToken;
 	  bool is_bitfield;
 	  int bit_offset;
 	  int bit_width;
+	};
+
+	class CRelocation {
+	public:
+		CRelocation *next;
+	  int offset;
+	  char **label;
+	  long addend;
 	};
 
 	void ir_gen(Ast *ast, ofstream &out, const string &moduleName);

@@ -40,6 +40,18 @@ static CMember *build_cmember(Member *member) {
   return cur;
 }
 
+static CRelocation *build_crelocation(Relocation *relocation) {
+  if (!relocation) {
+    return NULL;
+  }
+  CRelocation *cur = new CRelocation();
+  cur->next = build_crelocation(relocation->next);
+  cur->offset = relocation->offset;
+  cur->label = relocation->label;
+  cur->addend = relocation->addend;
+  return cur;
+}
+
 static CType *build_ctype(Type *ty) {
   if (!ty) {
     return NULL;
@@ -92,6 +104,7 @@ static Ast *build_ast(Obj *obj) {
   cur->init_data = obj->init_data;
   cur->is_local = obj->is_local;
   cur->is_tls = obj->is_tls;
+  cur->rel = build_crelocation(obj->rel);
   cur->is_definition = obj->is_definition;
   cur->offset = obj->offset;
   cur->type = build_ctype(obj->ty);
