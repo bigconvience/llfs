@@ -94,7 +94,6 @@ static Ast *build_ast(Obj *obj) {
   }
   Ast *cur = new Ast;
   cur->name = obj->name;
-  cout << "build_ast, name:" << cur->name << endl;
   cur->next = build_ast(obj->next);
   cur->is_static = obj->is_static;
   cur->is_function = obj->is_function;
@@ -114,7 +113,7 @@ static Ast *build_ast(Obj *obj) {
 }
 
 static Ast **emit_data(Obj *prog, Ast **ppCur) {
-  cout << "emit_data start" << endl;
+  cout << "\nemit_data start" << endl;
   for (Obj *var = prog; var; var = var->next) {
     if (var->is_function || !var->is_definition)
       continue;

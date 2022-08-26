@@ -19,6 +19,8 @@
 #include "chibicc.h"
 #include <iostream>
 
+static void dump_type(Type *type, int level);
+
 // Scope for local variables, global variables, typedefs
 // or enum constants
 typedef struct {
@@ -1832,7 +1834,7 @@ static Node *expr(Token **rest, Token *tok) {
 }
 
 static int64_t eval(Node *node) {
-  std::cout << "  eval node kind:" << node->kind << std::endl;
+  std::cout << "eval node kind:" << node->kind << std::endl;
   return eval2(node, NULL);
 }
 
@@ -1854,6 +1856,7 @@ static int64_t eval2(Node *node, char ***label) {
     std::cout << "ND_ADD" << std::endl;
     return eval2(node->lhs, label) + eval(node->rhs);
   case ND_SUB:
+    std::cout << "ND_SUB" << std::endl;
     return eval2(node->lhs, label) - eval(node->rhs);
   case ND_MUL:
     std::cout << "ND_MUL" << std::endl;
@@ -1917,6 +1920,7 @@ static int64_t eval2(Node *node, char ***label) {
     return val;
   }
   case ND_ADDR:
+    std::cout << "ND_ADDR" << std::endl;
     return eval_rval(node->lhs, label);
   case ND_LABEL_VAL:
     *label = &node->unique_label;
@@ -1944,15 +1948,19 @@ static int64_t eval2(Node *node, char ***label) {
 }
 
 static int64_t eval_rval(Node *node, char ***label) {
+  std::cout << "eval_rval: " << node->kind;
   switch (node->kind) {
   case ND_VAR:
     if (node->var->is_local)
       error_tok(node->tok, "not a compile-time constant");
     *label = &node->var->name;
+    std::cout << " ND_VAR:" << **label << std::endl;
     return 0;
   case ND_DEREF:
+    std::cout << " ND_DEREF" << std::endl;
     return eval2(node->lhs, label);
   case ND_MEMBER:
+    std::cout << " ND_MEMBER" << std::endl;
     return eval_rval(node->lhs, label) + node->member->offset;
   }
 
@@ -2389,6 +2397,7 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
   return new_binary(ND_ADD, lhs, rhs, tok);
 }
 
+
 // Like `+`, `-` is overloaded for the pointer type.
 static Node *new_sub(Node *lhs, Node *rhs, Token *tok) {
   add_type(lhs);
@@ -2409,6 +2418,8 @@ static Node *new_sub(Node *lhs, Node *rhs, Token *tok) {
 
   // ptr - num
   if (lhs->ty->base && is_integer(rhs->ty)) {
+    std::cout << "\nptr - num:" << std::endl;
+    dump_type(lhs->ty, 0);
     rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
     add_type(rhs);
     Node *node = new_binary(ND_SUB, lhs, rhs, tok);
@@ -3378,4 +3389,27 @@ Obj *parse(Token *tok) {
   // Remove redundant tentative definitions.
   scan_globals();
   return globals;
+}
+
+void dump_type(Type *type, int level) {
+  if (!type) {
+    return;
+  }
+
+  for (int i = 0; i < level; i++) {
+    std::cout << " ";
+  }
+  std::cout << "kind: " << type->kind
+    << " size: " << type->size
+    << " align: " << type->align
+    << " array_len: " << type->array_len;
+    std::cout << std::endl;
+  if (type->origin) {
+    std::cout << "origin: ";
+    dump_type(type->origin, level + 1);
+  }
+  if (type->base) {
+    std::cout << "base: ";
+    dump_type(type->base, level + 1);
+  }
 }

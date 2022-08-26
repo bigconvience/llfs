@@ -276,21 +276,33 @@ static uint64_t read_buf(char *buf, int sz) {
   return *buf;
 }
 
-llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, CType *ArrayType, char *buf, int offset) {
+llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, CType *ArrayType, char *buf, int offset, CRelocation *rel) {
   SmallVector<llvm::Constant *, 16> Elts;
   unsigned NumElements = ArrayType->array_len;
   Elts.reserve(NumElements);
   int sz = ArrayType->base->size;
 
   std::cout << "EmitArrayInitialization： " << NumElements 
-    << " sz: " <<  sz
+    << " size: " <<  sz
     << endl;
   
   Type *CommonElementType = Ty->getElementType();
   CType *baseTy = ArrayType->base;
-  for(int i = 0; i < NumElements; i++) {
-    llvm::Constant *C = buffer2Constants(CommonElementType, baseTy, NULL, buf, offset + sz * i);
-    Elts.push_back(C);
+  llvm::Constant *C = nullptr;
+  if (!rel) {
+     for(int i = 0; i < NumElements; i++) {
+      C = buffer2Constants(CommonElementType, baseTy, NULL, buf, offset + sz * i);
+      Elts.push_back(C);
+    }   
+  } else {
+    int i = 0;
+    while(rel) {
+      std::cout << "label: " << *rel->label << std::endl;
+      C = buffer2Constants(CommonElementType, baseTy, rel, buf, offset + sz * i);
+      Elts.push_back(C);
+      rel = rel->next;
+      i++;
+    } 
   }
 
   return llvm::ConstantArray::get(
@@ -338,8 +350,13 @@ llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, CType *ctype, char
   return llvm::ConstantStruct::get(STy, Elements);
 }
 
+/// Return the value offset.
+  llvm::Constant *getOffset(long offset) {
+    return llvm::ConstantInt::get(Builder->getInt64Ty(), offset);
+  }
+
 llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, char *buf, int offset, CRelocation *rel) {
-  cout << "EmitPointerInitialization" << endl;
+  cout << "EmitPointerInitialization: size: " << ctype->size << endl;
   llvm::Constant *Base = nullptr;
   llvm::Type *BaseValueTy = nullptr;
 
@@ -360,14 +377,29 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     Constant *constant = global->getInitializer();
     Base = global;
     BaseValueTy = constant->getType();
-  }
-  for (size_t i = Indices.size() - 1; i != size_t(-1); --i) {
-    IndexValues[i] = llvm::ConstantInt::get(Builder->getInt32Ty(), Indices[i]);
-  }
 
-  llvm::Constant *location =
-    llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, Base, IndexValues);
-  return location;
+    IndexValues[0] = llvm::ConstantInt::get(Builder->getInt32Ty(), Indices[0]);
+
+    if (addend >= 0) {
+      for (size_t i = Indices.size() - 1; i != size_t(0); --i) {
+        int indice = Indices[i];
+        llvm::Constant *indVal = nullptr;
+        if (indice) {
+          indVal = getOffset(indice);
+        } else {
+          indVal = llvm::ConstantInt::get(Builder->getInt32Ty(), indice);
+        }
+        IndexValues[i] = indVal;
+      }
+      llvm::Constant *location = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, Base, IndexValues);
+      return location;
+    }
+
+    IndexValues[1] = getOffset(addend);
+    llvm::Constant *location =
+      llvm::ConstantExpr::getGetElementPtr(BaseValueTy, Base, IndexValues);
+    return location;
+  }  
 }  
 
 static Constant *buffer2Constants(Type *varType, CType *ctype, CRelocation *rel, char *buf, int offset) {
@@ -381,7 +413,7 @@ static Constant *buffer2Constants(Type *varType, CType *ctype, CRelocation *rel,
       constant = llvm::ConstantInt::get(varType, read_buf(buf + offset, size));
       break;
     case CType::TY_ARRAY:
-      constant = EmitArrayInitialization(static_cast<llvm::ArrayType *>(varType),ctype, buf, offset);
+      constant = EmitArrayInitialization(static_cast<llvm::ArrayType *>(varType),ctype, buf, offset, rel);
       break;
     case CType::TY_UNION:
       constant = EmitUnionInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
@@ -429,7 +461,15 @@ static void InitializeModule(const string &moduleName) {
 GlobalVariable *createGlobalVar(Ast *yucNode) {
     string name = yucNode->name;
     CType *ctype = yucNode->type;
-    std::cout << "\ncreateGlobalVar kind:" << ctype->kind << endl;
+    std::cout << "\ncreateGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
+    if (ctype->base) {
+      std::cout << " base " << CType::ctypeKindString(ctype->base->kind);
+    }
+    if (ctype->origin) {
+      std::cout << " origin " << CType::ctypeKindString(ctype->origin->kind);
+    }
+    std::cout << endl;
+
     Type *DesiredType = yuc2LLVMType(yucNode->type);
     Constant *initializer = yuc2Constants(DesiredType, yucNode);
 

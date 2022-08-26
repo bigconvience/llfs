@@ -314,7 +314,7 @@ typedef enum {
   TY_ENUM,
   TY_PTR, // index 10
   TY_FUNC,
-  TY_ARRAY,
+  TY_ARRAY, // idnex 12
   TY_VLA, // variable-length array
   TY_STRUCT,
   TY_UNION,

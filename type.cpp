@@ -270,7 +270,7 @@ void add_type(Node *node) {
   case ND_ADDR: {
     Type *ty = node->lhs->ty;
     if (ty->kind == TY_ARRAY)
-      node->ty = pointer_to(ty->base);
+      node->ty = pointer_to(ty);
     else
       node->ty = pointer_to(ty);
     return;
