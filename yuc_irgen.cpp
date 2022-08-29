@@ -355,8 +355,23 @@ llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, CType *ctype, char
     return llvm::ConstantInt::get(Builder->getInt64Ty(), offset);
   }
 
+/// Apply the value offset to the given constant.
+llvm::Constant *applyOffset(llvm::Constant *C, long offset) {
+  if (!offset)
+    return C;
+
+  llvm::Type *origPtrTy = C->getType();
+  unsigned AS = origPtrTy->getPointerAddressSpace();
+  llvm::Type *charPtrTy = Builder->getInt8Ty()->getPointerTo(AS);
+  C = llvm::ConstantExpr::getBitCast(C, charPtrTy);
+  C = llvm::ConstantExpr::getGetElementPtr(Builder->getInt8Ty(), C, getOffset(offset));
+  C = llvm::ConstantExpr::getPointerCast(C, origPtrTy);
+  return C;
+}
+
 llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, char *buf, int offset, CRelocation *rel) {
   cout << "EmitPointerInitialization: size: " << ctype->size << endl;
+
   llvm::Constant *Base = nullptr;
   llvm::Type *BaseValueTy = nullptr;
 
@@ -372,24 +387,36 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     IndexValues.push_back(nullptr);
     char **label = rel->label;
     char *name = *label;
-    cout << "addend: " << addend << " name:" << name << endl;
+    cout << " addend: " << addend << " name:" << name << endl;
     GlobalVariable *global = TheModule->getGlobalVariable(name);
     Constant *constant = global->getInitializer();
     Base = global;
     BaseValueTy = constant->getType();
-
+    BaseValueTy->dump();
     IndexValues[0] = llvm::ConstantInt::get(Builder->getInt32Ty(), Indices[0]);
 
+    CType::CTypeKind baseTypeKind = ctype->base->kind;
+    std::cout << " base kind:" << CType::ctypeKindString(baseTypeKind);
+    if (addend == 0) {
+      if (BaseValueTy->isIntegerTy ()) {
+        return Base;
+      }
+    }
+
     if (addend >= 0) {
+      llvm::Constant *value = applyOffset(Base, addend);
+      return llvm::ConstantExpr::getPointerCast(value, Ty);
       for (size_t i = Indices.size() - 1; i != size_t(0); --i) {
         int indice = Indices[i];
+        std::cout << " indice: " << indice;
+
         llvm::Constant *indVal = nullptr;
         if (indice) {
           indVal = getOffset(indice);
         } else {
           indVal = llvm::ConstantInt::get(Builder->getInt32Ty(), indice);
         }
-        IndexValues[i] = indVal;
+        IndexValues[i] = getOffset(4);
       }
       llvm::Constant *location = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, Base, IndexValues);
       return location;
@@ -461,7 +488,7 @@ static void InitializeModule(const string &moduleName) {
 GlobalVariable *createGlobalVar(Ast *yucNode) {
     string name = yucNode->name;
     CType *ctype = yucNode->type;
-    std::cout << "\ncreateGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
+    std::cout << "createGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
     if (ctype->base) {
       std::cout << " base " << CType::ctypeKindString(ctype->base->kind);
     }
@@ -469,10 +496,10 @@ GlobalVariable *createGlobalVar(Ast *yucNode) {
       std::cout << " origin " << CType::ctypeKindString(ctype->origin->kind);
     }
     std::cout << endl;
-
+    std::cout << "DesiredType: ";
     Type *DesiredType = yuc2LLVMType(yucNode->type);
     Constant *initializer = yuc2Constants(DesiredType, yucNode);
-
+    std::cout << "initializer success" << std::endl;
     TheModule->getOrInsertGlobal(name, DesiredType);
     GlobalVariable *gVar = TheModule->getNamedGlobal(name);
     gVar->setAlignment(MaybeAlign(yucNode->align));
@@ -490,7 +517,7 @@ static void emit_data(Ast *ast) {
     return;
   }
   emit_data(ast->next);
-  std::cout << "emit_data name:" << ast->name << endl;
+  std::cout << "\nemit_data name:" << ast->name << endl;
   createGlobalVar(ast);
 }
 
