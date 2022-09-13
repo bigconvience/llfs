@@ -315,9 +315,11 @@ llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, CType *ctype, cha
   Elements.reserve(NumElements);
   std::cout << "EmitRecordInitialization NumElements： " << NumElements
     << endl;
+  int index = 0; 
   for (CMember *member = ctype->members; member; member = member->next) {
-    Type *Ty = yuc2LLVMType(member->ty);
-    llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, NULL, buf, offset + member->offset);
+    // Type *Ty = yuc2LLVMType(member->ty);
+    Type *memberTy = Ty->getTypeAtIndex(index++);
+    llvm::Constant *constantValue = buffer2Constants(memberTy, member->ty, NULL, buf, offset + member->offset);
     Elements.push_back(constantValue);
   }
 
