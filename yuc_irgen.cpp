@@ -429,7 +429,20 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
       llvm::ConstantExpr::getGetElementPtr(BaseValueTy, Base, IndexValues);
     return location;
   }  
-}  
+} 
+
+llvm::Constant *EmitIntegerInitialication(llvm::Type *destTy, CType *IntType, char *buf, int offset, CRelocation *rel) {
+  int size = IntType->size;
+  if (!rel) {
+    return llvm::ConstantInt::get(destTy, read_buf(buf + offset, size));
+  }
+  std::cout << "label: " << *rel->label << std::endl;
+  char **label = rel->label;
+    char *name = *label;
+  GlobalVariable *global = TheModule->getGlobalVariable(name);
+  Constant *value = global->getInitializer();
+  return llvm::ConstantExpr::getPtrToInt(global, destTy);
+}
 
 static Constant *buffer2Constants(Type *varType, CType *ctype, CRelocation *rel, char *buf, int offset) {
   Constant *constant;
@@ -439,10 +452,10 @@ static Constant *buffer2Constants(Type *varType, CType *ctype, CRelocation *rel,
     case CType::TY_SHORT:
     case CType::TY_INT:
     case CType::TY_LONG:
-      constant = llvm::ConstantInt::get(varType, read_buf(buf + offset, size));
+      constant = EmitIntegerInitialication(varType, ctype, buf, offset, rel);
       break;
     case CType::TY_ARRAY:
-      constant = EmitArrayInitialization(static_cast<llvm::ArrayType *>(varType),ctype, buf, offset, rel);
+      constant = EmitArrayInitialization(static_cast<llvm::ArrayType *>(varType), ctype, buf, offset, rel);
       break;
     case CType::TY_UNION:
       constant = EmitUnionInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
