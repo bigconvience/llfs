@@ -24,6 +24,76 @@ static int stmt_count = 0;
 static std::ofstream output("./test2/ast_ir.out");
 static std::map<int, Value*> LocallAddress;
 static Constant *buffer2Constants(Type *Ty, CType *ctype, CRelocation *rel, char *buf, int offset);
+static std::map<string, Ast*> annonVar;
+static std::map<string, llvm::GlobalVariable*> annonGlobalVar;
+
+static bool isAnnonVar(std::string &name) {
+  int index = name.find(".L..");
+  return index == 0;
+}
+
+class CodeGenModule {
+private:
+  llvm::Module &TheModule;
+  llvm::LLVMContext &VMContext;
+
+public:
+  CodeGenModule(llvm::Module &M);
+  ~CodeGenModule();
+  
+  llvm::GlobalVariable *GetAddrOfConstantCString(const std::string &Str, const char *GlobalName);
+
+  llvm::LLVMContext &getLLVMContext() { return VMContext; }
+  llvm::Module &getModule() { return TheModule; }
+
+};
+
+static llvm::GlobalVariable *
+GenerateStringLiteral(llvm::Constant *C, llvm::GlobalValue::LinkageTypes LT,
+                      CodeGenModule &CGM, StringRef GlobalName,
+                      int Alignment) {
+  unsigned AddrSpace = 0;
+  llvm::Module &M = CGM.getModule();
+  // Create a global variable for this string
+  auto *GV = new llvm::GlobalVariable(
+      M, C->getType(), true, LT, C, GlobalName,
+      nullptr, llvm::GlobalVariable::NotThreadLocal, AddrSpace);
+  GV->setAlignment(MaybeAlign(Alignment));
+  GV->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+  if (GV->isWeakForLinker()) {
+    GV->setComdat(M.getOrInsertComdat(GV->getName()));
+  }
+  return GV;
+}
+
+CodeGenModule::CodeGenModule(llvm::Module &M)
+  : TheModule(M), VMContext(M.getContext()) {
+  // Initialize the type cache.
+  llvm::LLVMContext &LLVMContext = M.getContext();
+}
+
+CodeGenModule::~CodeGenModule() {}
+
+llvm::GlobalVariable *CodeGenModule::GetAddrOfConstantCString(const std::string &Str, const char *GlobalName) {
+  StringRef StrWithNull(Str.c_str(), Str.size() + 1);
+  llvm::Constant *C =
+      llvm::ConstantDataArray::getString(getLLVMContext(), StrWithNull, false);
+  int Alignment = 1;
+  // Get the default prefix if a name wasn't specified.
+  if (!GlobalName)
+    GlobalName = ".str";
+  // Create a global variable for this.
+  auto GV = GenerateStringLiteral(C, llvm::GlobalValue::PrivateLinkage, *this,
+                                  GlobalName, Alignment);
+  return GV;
+}
+
+static std::unique_ptr<CodeGenModule> ModuleBuilder;
+
+CodeGenModule &CGM() {
+  return *ModuleBuilder;
+}
+
 
 llvm::Type *getPaddingType(int PadSize) {
   llvm::Type *Ty = Builder->getInt8Ty();
@@ -36,10 +106,6 @@ llvm::Type *getPaddingType(int PadSize) {
 llvm::Constant *getPadding(int PadSize) {
   llvm::Type *Ty = getPaddingType(PadSize);
   return llvm::UndefValue::get(Ty);
-}
-
-static LLVMContext &getLLVMContext() {
-  return *TheContext;
 }
 
 static string buildSeperator(int count, string target) {
@@ -231,7 +297,7 @@ static llvm::StructType *ConvertRecordDeclType(CType *ctype) {
 }
 
 static Type *yuc2LLVMType(CType *ctype) {
-  cout << "yuc2LLVMType start: "
+  cout << "yuc2LLVMType start kind: "
       << CType::ctypeKindString(ctype->kind) << endl;
   Type *type;
   switch (ctype->kind) {
@@ -348,7 +414,7 @@ llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, CType *ctype, char
       Elements.push_back(getPadding(DesiredSize - Size));
     }
   }
-  llvm::StructType *STy = llvm::ConstantStruct::getTypeForElements(getLLVMContext(), Elements, Packed);
+  llvm::StructType *STy = llvm::ConstantStruct::getTypeForElements(CGM().getLLVMContext(), Elements, Packed);
   return llvm::ConstantStruct::get(STy, Elements);
 }
 
@@ -390,7 +456,14 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     char **label = rel->label;
     char *name = *label;
     cout << " addend: " << addend << " name:" << name << endl;
-    GlobalVariable *global = TheModule->getGlobalVariable(name);
+    GlobalVariable *global;
+    string nameStr = name;
+    if (isAnnonVar(nameStr)) {
+      global = annonGlobalVar[nameStr];
+      cout << " annonGlobalVar: " << global->isConstant() << endl;
+      return global;
+    }
+    TheModule->getGlobalVariable(name);
     Constant *constant = global->getInitializer();
     Base = global;
     BaseValueTy = constant->getType();
@@ -493,6 +566,7 @@ static void InitializeModule(const string &moduleName) {
   TheModule = std::make_unique<Module>(moduleName, *TheContext);
   // Create a new builder for the module.
   Builder = std::make_unique<IRBuilder<>>(*TheContext);
+  ModuleBuilder = std::make_unique<CodeGenModule>(*TheModule);
 }
 
 
@@ -512,7 +586,7 @@ GlobalVariable *createGlobalVar(Ast *yucNode) {
     }
     std::cout << endl;
     std::cout << "DesiredType: ";
-    Type *DesiredType = yuc2LLVMType(yucNode->type);
+    Type *DesiredType = yuc2LLVMType(ctype);
     Constant *initializer = yuc2Constants(DesiredType, yucNode);
     std::cout << "initializer success" << std::endl;
     TheModule->getOrInsertGlobal(name, DesiredType);
@@ -663,17 +737,43 @@ static void emit_text(Ast *ast) {
   buildFunction(fn);
 }
 
+void processAnnonVar(Ast *ast) {
+  if (ast) {
+    processAnnonVar(ast->next);
+    string name = ast->name;
+    std::cout << "cur name:" << name << endl;
+    const std::string &Str = ast->init_data;
+    annonGlobalVar[name] = CGM().GetAddrOfConstantCString(Str, nullptr);
+  }
+}
+
 void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
   cout << "ir_gen start\n";
   if (!ast) {
     std::cerr << "no ast" << std::endl;
     return;
   }
-  InitializeModule(moduleName);
-  emit_data(ast);
-  emit_text(ast);
 
-  // Builder->CreateGlobalStringPtr(StringRef("Hello, world!\n"));
+  Ast *annonP, *namedP;
+  Ast **annon = &annonP, **named =&namedP;
+  for (Ast *cur = ast; cur; cur = cur->next) {
+    string name = cur->name;
+    if (isAnnonVar(name)) {
+      *annon = cur;
+      annon = &cur->next;
+    } else {
+      *named = cur;
+      named = &cur->next;
+    }
+  }
+  *annon = nullptr;
+  *named = nullptr;
+
+  InitializeModule(moduleName);
+  processAnnonVar(annonP);
+  emit_data(namedP);
+  // emit_text(ast);
+
   TheModule->print(errs(), nullptr);
   std::cout << "yuc end" << std::endl;
 }
