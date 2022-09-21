@@ -26,6 +26,7 @@ static std::map<int, Value*> LocallAddress;
 static Constant *buffer2Constants(Type *Ty, CType *ctype, CRelocation *rel, char *buf, int offset);
 static std::map<string, Ast*> annonVar;
 static std::map<string, llvm::GlobalVariable*> annonGlobalVar;
+static std::map<string, llvm::GlobalVariable*> strLiteralCache;
 
 static bool isAnnonVar(std::string &name) {
   int index = name.find(".L..");
@@ -75,6 +76,10 @@ CodeGenModule::CodeGenModule(llvm::Module &M)
 CodeGenModule::~CodeGenModule() {}
 
 llvm::GlobalVariable *CodeGenModule::GetAddrOfConstantCString(const std::string &Str, const char *GlobalName) {
+  if (strLiteralCache[Str]) {
+    return strLiteralCache[Str];
+  }
+
   StringRef StrWithNull(Str.c_str(), Str.size() + 1);
   llvm::Constant *C =
       llvm::ConstantDataArray::getString(getLLVMContext(), StrWithNull, false);
@@ -85,6 +90,7 @@ llvm::GlobalVariable *CodeGenModule::GetAddrOfConstantCString(const std::string 
   // Create a global variable for this.
   auto GV = GenerateStringLiteral(C, llvm::GlobalValue::PrivateLinkage, *this,
                                   GlobalName, Alignment);
+  strLiteralCache[Str] = GV;
   return GV;
 }
 
@@ -461,9 +467,10 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     if (isAnnonVar(nameStr)) {
       global = annonGlobalVar[nameStr];
       cout << " annonGlobalVar: " << global->isConstant() << endl;
-      return global;
+    } else {
+      global = TheModule->getGlobalVariable(name);
     }
-    TheModule->getGlobalVariable(name);
+    
     Constant *constant = global->getInitializer();
     Base = global;
     BaseValueTy = constant->getType();
