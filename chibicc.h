@@ -362,6 +362,8 @@ struct Type {
 
   // Union field
   Member *union_field;
+
+  bool is_typedef;
 };
 
 // Struct member

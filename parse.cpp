@@ -3160,6 +3160,7 @@ static Token *parse_typedef(Token *tok, Type *basety) {
     first = false;
 
     Type *ty = declarator(&tok, tok, basety);
+    ty->is_typedef = true;
     if (!ty->name)
       error_tok(ty->name_pos, "typedef name omitted");
     push_scope(get_ident(ty->name))->type_def = ty;

@@ -278,7 +278,11 @@ static llvm::StructType *yuc2StructType(CType *ctype) {
   for (CMember *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
-  type = llvm::StructType::create(*TheContext, Types, "", false);
+  if (ctype->is_typedef) {
+    type = llvm::StructType::get(*TheContext, Types, false);
+  } else {
+    type = llvm::StructType::create(*TheContext, Types, "", false);
+  }
   return type;
 }
 

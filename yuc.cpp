@@ -65,6 +65,7 @@ static CType *build_ctype(Type *ty) {
   ctype->origin = build_ctype(ty->origin);
   ctype->base = build_ctype(ty->base);
   ctype->array_len = ty->array_len;
+  ctype->is_typedef = ty->is_typedef;
 
   gen_cnode(ty->vla_len, &ctype->vla_len);
   ctype->vla_size = build_ast(ty->vla_size);

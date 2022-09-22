@@ -134,6 +134,8 @@ typedef class CToken CToken;
 		// Union field
   	CMember *union_field;
 
+  	bool is_typedef;
+
 		static string ctypeKindString(CTypeKind kind) {
 			string kindStr;
 			switch(kind) {
