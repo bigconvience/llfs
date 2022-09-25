@@ -586,30 +586,34 @@ static void InitializeModule(const string &moduleName) {
  * https://www.llvm.org/doxygen/classllvm_1_1GlobalVariable.html
  */ 
 GlobalVariable *createGlobalVar(Ast *yucNode) {
-    string name = yucNode->name;
-    CType *ctype = yucNode->type;
-    std::cout << "createGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
-    if (ctype->base) {
-      std::cout << " base " << CType::ctypeKindString(ctype->base->kind);
-    }
-    if (ctype->origin) {
-      std::cout << " origin " << CType::ctypeKindString(ctype->origin->kind);
-    }
-    std::cout << endl;
-    std::cout << "DesiredType: ";
-    Type *DesiredType = yuc2LLVMType(ctype);
-    Constant *initializer = yuc2Constants(DesiredType, yucNode);
-    std::cout << "initializer success" << std::endl;
-    TheModule->getOrInsertGlobal(name, DesiredType);
-    GlobalVariable *gVar = TheModule->getNamedGlobal(name);
-    gVar->setAlignment(MaybeAlign(yucNode->align));
-    if (!yucNode->is_static) {
-      gVar->setDSOLocal(true);
-    }
-    
-    gVar->setInitializer(initializer);
-    gVar->setLinkage(yuc2LinkageType(yucNode));
-    return gVar;
+  string name = yucNode->name;
+  CType *ctype = yucNode->type;
+  std::cout << "createGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
+  if (ctype->base) {
+    std::cout << " base " << CType::ctypeKindString(ctype->base->kind);
+  }
+  if (ctype->origin) {
+    std::cout << " origin " << CType::ctypeKindString(ctype->origin->kind);
+  }
+  std::cout << endl;
+  // 获取全局变量的类型
+  Type *DesiredType = yuc2LLVMType(ctype);
+  // 注册全局变量
+  TheModule->getOrInsertGlobal(name, DesiredType);
+  GlobalVariable *gVar = TheModule->getNamedGlobal(name);
+  // 设置该全局变量的align属性
+  gVar->setAlignment(MaybeAlign(yucNode->align));
+  // 设置该全局变量的DSOLocal属性
+  if (!yucNode->is_static) {
+    gVar->setDSOLocal(true);
+  }
+  // 创建对应的常量
+  Constant *initializer = yuc2Constants(DesiredType, yucNode);
+  // 初始化全局变量
+  gVar->setInitializer(initializer);
+  // 设置Linkage属性
+  gVar->setLinkage(yuc2LinkageType(yucNode));
+  return gVar;
 }
 
 static void emit_data(Ast *ast) {
@@ -783,8 +787,7 @@ void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
   processAnnonVar(annonP);
   emit_data(namedP);
   // emit_text(ast);
-
-  TheModule->print(errs(), nullptr);
+  TheModule->dump();
   std::cout << "yuc end" << std::endl;
 }
 
