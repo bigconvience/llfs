@@ -24,8 +24,7 @@ static int stmt_count = 0;
 static std::ofstream output("./test2/ast_ir.out");
 static std::map<int, Value*> LocallAddress;
 static Constant *buffer2Constants(Type *Ty, CType *ctype, CRelocation *rel, char *buf, int offset);
-static std::map<string, Ast*> annonVar;
-static std::map<string, llvm::GlobalVariable*> annonGlobalVar;
+static std::map<string, char *> annonInitData;
 static std::map<string, llvm::GlobalVariable*> strLiteralCache;
 
 static bool isAnnonVar(std::string &name) {
@@ -469,7 +468,8 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     GlobalVariable *global;
     string nameStr = name;
     if (isAnnonVar(nameStr)) {
-      global = annonGlobalVar[nameStr];
+      const std::string &Str = annonInitData[nameStr];
+      global = CGM().GetAddrOfConstantCString(Str, nullptr);
       cout << " annonGlobalVar: " << global->isConstant() << endl;
     } else {
       global = TheModule->getGlobalVariable(name);
@@ -753,8 +753,7 @@ void processAnnonVar(Ast *ast) {
     processAnnonVar(ast->next);
     string name = ast->name;
     std::cout << "cur name:" << name << endl;
-    const std::string &Str = ast->init_data;
-    annonGlobalVar[name] = CGM().GetAddrOfConstantCString(Str, nullptr);
+    annonInitData[name] = ast->init_data;
   }
 }
 
