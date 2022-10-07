@@ -588,6 +588,9 @@ static void InitializeModule(const string &moduleName) {
 GlobalVariable *createGlobalVar(Ast *yucNode) {
   string name = yucNode->name;
   CType *ctype = yucNode->type;
+  if (ctype->kind == CType::TY_FUNC) {
+    return nullptr;
+  }
   std::cout << "createGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
   if (ctype->base) {
     std::cout << " base " << CType::ctypeKindString(ctype->base->kind);
@@ -621,7 +624,6 @@ static void emit_data(Ast *ast) {
     return;
   }
   emit_data(ast->next);
-  std::cout << "\nemit_data name:" << ast->name << endl;
   createGlobalVar(ast);
 }
 
@@ -635,7 +637,9 @@ static FunctionType * buildFunctionType(Ast *funcNode) {
 
   Type *RetTy = yuc2LLVMType(funcType->return_ty);
   bool isVarArg = funcType->is_variadic;
-
+  if (types.empty()) {
+    isVarArg = false;
+  }
   FunctionType *functionType = FunctionType::get(RetTy, types, isVarArg);
   return functionType;
 }
@@ -682,8 +686,33 @@ static Value *getValue(CNode *node, Type *returnType) {
   return NULL;
 }
 
-static void StartFunction(Ast *funcNode) {
-  cout << "StartFunction " << endl;
+/// CreateEntryBlockAlloca - Create an alloca instruction in the entry block of
+/// the function.  This is used for mutable variables etc.
+static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
+                                          const std::string &VarName,
+                                          Type *Ty) {
+  IRBuilder<> TmpB(&TheFunction->getEntryBlock(),
+                 TheFunction->getEntryBlock().begin());
+  return TmpB.CreateAlloca(Ty, 0,
+                           VarName.c_str());
+}
+
+/// CreateEntryBlockAlloca - Create an alloca instruction in the entry block of
+/// the function.  This is used for mutable variables etc.
+static AllocaInst *CreateMainEntryBlockAlloca(Function *TheFunction,
+                                          const std::string &VarName) {
+  return CreateEntryBlockAlloca(TheFunction, VarName, Type::getInt32Ty(*TheContext));
+}
+
+static void StartFunction(Function *Fn, Ast *funcNode) {
+  const char *name = Fn->getName().data();
+  cout << "StartFunction " << name << endl;
+  BasicBlock *entry = BasicBlock::Create(*TheContext, "", Fn);
+  Builder->SetInsertPoint(entry);
+  if (!strcmp(name, "main")) {
+    AllocaInst *Alloca = CreateMainEntryBlockAlloca(Fn, "");
+    Builder->CreateStore(Builder->getInt32(0), Alloca);
+  }
 }
 
 static void FinishFunction(Function *Func, Ast *funcNode) {
@@ -729,26 +758,35 @@ static void prepareLocals(Function *Func, Ast *funcNode) {
 }
 
 static void buildFunctionBody(Function *Func, Ast *funcNode) {
-  BasicBlock *entry = BasicBlock::Create(*TheContext, "", Func);
-  Builder->SetInsertPoint(entry);
+  // BasicBlock *entry = BasicBlock::Create(*TheContext, "", Func);
+  // Builder->SetInsertPoint(entry);
 
   prepareLocals(Func, funcNode);
 }
 
 void buildFunction(Ast *funcNode) {
+  if (!funcNode || funcNode->type->kind != CType::TY_FUNC) {
+    return;
+  }
   cout << "buildFunction " << funcNode->name << endl;
   Function *fooFunc = createFunc(funcNode);
-  StartFunction(funcNode);
+  if (!funcNode->is_definition) {
+    return;
+  }
+  cout << "is_function " << funcNode->is_function << endl;
+  StartFunction(fooFunc, funcNode);
   buildFunctionBody(fooFunc, funcNode);
-  FinishFunction(fooFunc, funcNode);
-  verifyFunction(*fooFunc);
+  // FinishFunction(fooFunc, funcNode);
+  // verifyFunction(*fooFunc);
 }
 
 static void emit_text(Ast *ast) {
   Ast *fn = ast;
-  if (!fn ||!fn->is_function || !fn->is_definition) {
+  if (!fn) {
     return;
   }
+  emit_text(fn->next);
+  std::cout << "\nemit_text name:" << fn->name << endl;
   buildFunction(fn);
 }
 
@@ -786,7 +824,7 @@ void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
   InitializeModule(moduleName);
   processAnnonVar(annonP);
   emit_data(namedP);
-  // emit_text(ast);
+  emit_text(namedP);
   TheModule->dump();
   std::cout << "yuc end" << std::endl;
 }

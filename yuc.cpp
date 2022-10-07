@@ -105,7 +105,6 @@ static Ast *build_ast(Obj *obj) {
   cur->is_local = obj->is_local;
   cur->is_tls = obj->is_tls;
   cur->rel = build_crelocation(obj->rel);
-  cur->is_definition = obj->is_definition;
   cur->offset = obj->offset;
   cur->type = build_ctype(obj->ty);
   cur->locals = build_ast(obj->locals);

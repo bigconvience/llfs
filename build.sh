@@ -4,4 +4,4 @@ rm chibicc
 
 make
 
-./chibicc ./test2/initializer.c
+./run.sh
