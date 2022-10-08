@@ -27,6 +27,9 @@ static Constant *buffer2Constants(Type *Ty, CType *ctype, CRelocation *rel, char
 static std::map<string, char *> annonInitData;
 static std::map<string, llvm::GlobalVariable*> strLiteralCache;
 
+static void gen_expr(CNode *node);
+static void gen_stmt(CNode *node);
+
 static bool isAnnonVar(std::string &name) {
   int index = name.find(".L..");
   return index == 0;
@@ -142,10 +145,11 @@ static void cast(CType *from, CType *to) {
 
 static void gen_expr(CNode *node) {
   int cur_level = ++stmt_level;
-  output << buildSeperator(cur_level, "gen_expr start, kind:") 
-  << node->kind <<  endl; 
+  CNode::CNodeKind kind = node->kind;
+  string kindStr = CNode::node_kind_info(kind);
+  output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr) << endl; 
   cur_level++;
-  switch(node->kind) {
+  switch(kind) {
     case CNode::CNodeKind::ND_NULL_EXPR:
       output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << endl;
       break;
@@ -180,6 +184,11 @@ static void gen_expr(CNode *node) {
     case CNode::CNodeKind::ND_ADD:
       output << buildSeperator(cur_level, "ND_ADD:") << node->kind << endl;
       break;
+    case CNode::CNodeKind::ND_FUNCALL: {
+      
+    }
+
+      break;
 
   }
   stmt_level--;
@@ -190,27 +199,28 @@ static void gen_expr(CNode *node) {
 static void gen_stmt(CNode *node) {
   int cur_count = ++stmt_count;
   int level = ++stmt_level;
-  output << buildSeperator(level, "gen_stmt start ==> ") << cur_count << endl;
-  switch(node->kind) {
+  CNode::CNodeKind kind = node->kind;
+  string kindStr = CNode::node_kind_info(kind);
+  output << buildSeperator(level, "gen_stmt start:") << " "<< cur_count << endl;
+  output << buildSeperator(level, kindStr) << endl;
+  switch(kind) {
     case CNode::CNodeKind::ND_BLOCK: // 32
-      output << buildSeperator(level+1, "ND_BLOCK:") << node->kind << "\n"; 
       for (CNode *n = node->body; n; n = n->next) {
         gen_stmt(n);
       }
       break;
     case CNode::CNodeKind::ND_EXPR_STMT:
-      output << buildSeperator(level+1, "ND_EXPR_STMT:")<< node->kind << "\n"; 
       gen_expr(node->lhs);
       break;
 
     case CNode::CNodeKind::ND_RETURN:
-      output << buildSeperator(level+1, "ND_RETURN:") << node->kind << "\n"; 
+      output << buildSeperator(level+1, kindStr) << "\n"; 
       break;
     default:
-      output << buildSeperator(level+1, "gen_stmt unknow kind: ") << node->kind << endl;
+      output << buildSeperator(level+1, kindStr) << endl;
       break;
   }
-  output << buildSeperator(level, "gen_stmt end <<<=== ") <<  cur_count << endl;
+  output << buildSeperator(level, "gen_stmt end ") <<  cur_count << endl;
   --stmt_level;
 }
 
@@ -757,11 +767,13 @@ static void prepareLocals(Function *Func, Ast *funcNode) {
   }
 }
 
+
 static void buildFunctionBody(Function *Func, Ast *funcNode) {
   // BasicBlock *entry = BasicBlock::Create(*TheContext, "", Func);
   // Builder->SetInsertPoint(entry);
 
-  prepareLocals(Func, funcNode);
+  // prepareLocals(Func, funcNode);
+  gen_stmt(funcNode->body);
 }
 
 void buildFunction(Ast *funcNode) {
@@ -776,8 +788,8 @@ void buildFunction(Ast *funcNode) {
   cout << "is_function " << funcNode->is_function << endl;
   StartFunction(fooFunc, funcNode);
   buildFunctionBody(fooFunc, funcNode);
-  // FinishFunction(fooFunc, funcNode);
-  // verifyFunction(*fooFunc);
+  FinishFunction(fooFunc, funcNode);
+  verifyFunction(*fooFunc);
 }
 
 static void emit_text(Ast *ast) {

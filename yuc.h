@@ -267,7 +267,7 @@ typedef class CToken CToken;
 	  string cont_label;
 
 	  // Block or statement expression
-  	CNode *body;
+		CNode *body;
 
 	  // Struct member access
 	  CMember *member;
