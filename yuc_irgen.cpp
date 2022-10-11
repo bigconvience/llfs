@@ -27,8 +27,25 @@ static Constant *buffer2Constants(Type *Ty, CType *ctype, CRelocation *rel, char
 static std::map<string, char *> annonInitData;
 static std::map<string, llvm::GlobalVariable*> strLiteralCache;
 
-static void gen_expr(CNode *node);
+static Value *gen_expr(CNode *node);
 static void gen_stmt(CNode *node);
+static Constant *yuc2Constants(Type *Ty, Ast *gvarNode);
+static GlobalVariable *createGlobalVar(Ast *yucNode);
+
+Function *getFunction(std::string Name) {
+  // First, see if the function has already been added to the current module.
+  if (auto *F = TheModule->getFunction(Name))
+    return F;
+
+  // If not, check whether we can codegen the declaration from some existing
+  // prototype.
+  // auto FI = FunctionProtos.find(Name);
+  // if (FI != FunctionProtos.end())
+  //   return FI->second->codegen();
+
+  // If no existing prototype exists, return null.
+  return nullptr;
+}
 
 static bool isAnnonVar(std::string &name) {
   int index = name.find(".L..");
@@ -125,30 +142,63 @@ static string buildSeperator(int count, string target) {
   return result;
 }
 
-static void gen_addr(CNode *node) {
+static Value *gen_addr(CNode *node) {
   int cur_level = ++stmt_level;
-  output << buildSeperator(cur_level, "gen_addr")
-      << " node kind:" << node->kind << endl;
   cur_level++;
-
+  Value *Addr = nullptr;
+  CNode::CNodeKind kind = node->kind;
+  string kindStr = CNode::node_kind_info(kind);
+  output << buildSeperator(cur_level, "gen_addr:" + kindStr) << endl;
   switch(node->kind) {
     case CNode::CNodeKind::ND_VAR:
-      output << buildSeperator(cur_level, "ND_VAR:") << node->kind << endl;
-      break;
+    Ast *var = node->var;
+    string typeStr = CType::ctypeKindString(var->type->kind);
+    output << buildSeperator(cur_level, "var type:" + typeStr) << endl;
+    string nameStr = var->name;
+    if (isAnnonVar(nameStr)) {
+      const std::string &Str = annonInitData[nameStr];
+      Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
+    }
+    break;
   }
   --stmt_level;
+  return Addr;
 }
 
 static void cast(CType *from, CType *to) {
+  string fromType = CType::ctypeKindString(from->kind);
+  string toType = CType::ctypeKindString(to->kind);
+  output << "fromType: " << fromType << " toType: " << toType << endl;
+  CType::CTypeKind fromKind = to->kind;
+  CType::CTypeKind toKind = to->kind;
+  if (fromKind == CType::TY_VOID) {
+    return;
+  }
+  if (fromKind == CType::TY_ARRAY || toKind == CType::TY_PTR) {
+    
+  }
 
 }
 
-static void gen_expr(CNode *node) {
+
+
+static std::vector<Value *> push_args(CNode *node) {
+  std::vector<Value *> ArgsV;
+  for (CNode *arg = node->args; arg; arg = arg->next) {
+    Value *v = gen_expr(arg);
+    ArgsV.push_back(v);
+  }
+  return ArgsV;
+}
+
+
+static Value *gen_expr(CNode *node) {
   int cur_level = ++stmt_level;
   CNode::CNodeKind kind = node->kind;
   string kindStr = CNode::node_kind_info(kind);
   output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr) << endl; 
   cur_level++;
+  Value *V = nullptr;
   switch(kind) {
     case CNode::CNodeKind::ND_NULL_EXPR:
       output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << endl;
@@ -174,18 +224,23 @@ static void gen_expr(CNode *node) {
       output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << endl;
       break;
     case CNode::CNodeKind::ND_VAR:
-      output << buildSeperator(cur_level, "ND_VAR:") << node->kind << endl;
+      V = gen_addr(node);
       break;
     case CNode::CNodeKind::ND_CAST:
-      output << buildSeperator(cur_level, "ND_CAST:") << node->kind << endl;
-      gen_expr(node->lhs);
+      V = gen_expr(node->lhs);
       cast(node->lhs->type, node->type);
       break;
     case CNode::CNodeKind::ND_ADD:
       output << buildSeperator(cur_level, "ND_ADD:") << node->kind << endl;
       break;
     case CNode::CNodeKind::ND_FUNCALL: {
-      
+      std::vector<Value *> ArgsV = push_args(node);
+      string Callee = node->lhs->var->name;
+      output << buildSeperator(cur_level, Callee) << endl;
+      Function *CalleeF = getFunction(Callee);
+      assert(CalleeF && "Unkonw function referenced");
+      V = Builder->CreateCall(CalleeF, ArgsV, "");
+      break;
     }
 
       break;
@@ -193,7 +248,8 @@ static void gen_expr(CNode *node) {
   }
   stmt_level--;
   cur_level--;
-  output << buildSeperator(cur_level, "gen_expr end") << endl; 
+  output << buildSeperator(cur_level, "gen_expr end") << endl;
+  return V;
 }
 
 static void gen_stmt(CNode *node) {
@@ -225,7 +281,7 @@ static void gen_stmt(CNode *node) {
 }
 
 static void ComputeRecordLayout(CType *ctype, llvm::StructType *Ty) {
-  cout << "ComputeRecordLayout" << endl;
+  output << "ComputeRecordLayout" << endl;
   llvm::SmallVector<llvm::Type *, 16> Types;
   Types.reserve(ctype->memberCount);
   CMember *member = ctype->union_field;
@@ -255,22 +311,22 @@ static Type *yuc2PointerType(CType *ctype) {
 }
 
 static llvm::StructType *yuc2StructType(CType *ctype) {
-  cout << "yuc2StructType" << endl;
+  output << "yuc2StructType" << endl;
   llvm::SmallVector<llvm::Type *, 16> Types;
   Types.reserve(ctype->memberCount);
   CMember *member = ctype->union_field;
   llvm::StructType *type;
   int DesiredSize = ctype->size;
-  cout << "yuc2StructType DesiredSize:" << DesiredSize << endl;
+  output << "yuc2StructType DesiredSize:" << DesiredSize << endl;
   // union
   if (member) {
     int Size = member->ty->size;
-    cout << "union member idx: " << member->idx << " size: " << Size << endl;
+    output << "union member idx: " << member->idx << " size: " << Size << endl;
     
     Types.push_back(yuc2LLVMType(member->ty));
     if (DesiredSize > Size) {
       int PadSize = DesiredSize - Size;
-      cout << "PadSize: " << PadSize << endl;
+      output << "PadSize: " << PadSize << endl;
       llvm::Type *paddingType = getPaddingType(PadSize);
       Types.push_back(paddingType);
     }
@@ -280,7 +336,7 @@ static llvm::StructType *yuc2StructType(CType *ctype) {
     } else {
       type = llvm::StructType::create(*TheContext, Types, "", false);
     }
-    cout << "final type: " << Types.size() << endl;
+    output << "final type: " << Types.size() << endl;
     return type;
   }
   // struct
@@ -309,14 +365,14 @@ void addRecordTypeName(CType *ctype, llvm::StructType *Ty, StringRef suffix) {
 }
 
 static llvm::StructType *ConvertRecordDeclType(CType *ctype) {
-  cout << "ConvertRecordDeclType" << endl;
+  output << "ConvertRecordDeclType" << endl;
   llvm::StructType *DesiredType = yuc2StructType(ctype);
   addRecordTypeName(ctype, DesiredType, "");
   return DesiredType;
 }
 
 static Type *yuc2LLVMType(CType *ctype) {
-  cout << "yuc2LLVMType start kind: "
+  output << "yuc2LLVMType start kind: "
       << CType::ctypeKindString(ctype->kind) << endl;
   Type *type;
   switch (ctype->kind) {
@@ -367,7 +423,7 @@ llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, CType *ArrayType, c
   Elts.reserve(NumElements);
   int sz = ArrayType->base->size;
 
-  std::cout << "EmitArrayInitialization： " << NumElements 
+  output << "EmitArrayInitialization： " << NumElements 
     << " size: " <<  sz
     << endl;
   
@@ -382,7 +438,7 @@ llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, CType *ArrayType, c
   } else {
     int i = 0;
     while(rel) {
-      std::cout << "label: " << *rel->label << std::endl;
+      output << "label: " << *rel->label << std::endl;
       C = buffer2Constants(CommonElementType, baseTy, rel, buf, offset + sz * i);
       Elts.push_back(C);
       rel = rel->next;
@@ -398,7 +454,7 @@ llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, CType *ctype, cha
   SmallVector<llvm::Constant *, 16> Elements;
   unsigned NumElements = ctype->memberCount;
   Elements.reserve(NumElements);
-  std::cout << "EmitRecordInitialization NumElements： " << NumElements
+  output << "EmitRecordInitialization NumElements： " << NumElements
     << endl;
   int index = 0; 
   for (CMember *member = ctype->members; member; member = member->next) {
@@ -416,7 +472,7 @@ llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, CType *ctype, char
   int AlignedSize = ctype->align; 
   SmallVector<llvm::Constant *, 16> Elements;
   unsigned NumElements = ctype->memberCount;
-  std::cout << "EmitUnionInitialization NumElements： " << NumElements 
+  output << "EmitUnionInitialization NumElements： " << NumElements 
     << " DesiredSize: " <<  DesiredSize
     << " AlignedSize: " <<  AlignedSize 
     << endl;
@@ -425,7 +481,7 @@ llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, CType *ctype, char
   CMember *member = ctype->union_field;
   if (member) {
     int Size = member->ty->size;
-    std::cout << "EmitUnionInitialization union Size " << Size << endl;
+    output << "EmitUnionInitialization union Size " << Size << endl;
     Type *Ty = yuc2LLVMType(member->ty);
     llvm::Constant *constantValue = buffer2Constants(Ty, member->ty, NULL, buf, offset + member->offset);
     Elements.push_back(constantValue);
@@ -457,7 +513,7 @@ llvm::Constant *applyOffset(llvm::Constant *C, long offset) {
 }
 
 llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, char *buf, int offset, CRelocation *rel) {
-  cout << "EmitPointerInitialization: size: " << ctype->size << endl;
+  output << "EmitPointerInitialization: size: " << ctype->size << endl;
 
   llvm::Constant *Base = nullptr;
   llvm::Type *BaseValueTy = nullptr;
@@ -474,13 +530,13 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     IndexValues.push_back(nullptr);
     char **label = rel->label;
     char *name = *label;
-    cout << " addend: " << addend << " name:" << name << endl;
+    output << " addend: " << addend << " name:" << name << endl;
     GlobalVariable *global;
     string nameStr = name;
     if (isAnnonVar(nameStr)) {
       const std::string &Str = annonInitData[nameStr];
       global = CGM().GetAddrOfConstantCString(Str, nullptr);
-      cout << " annonGlobalVar: " << global->isConstant() << endl;
+      output << " annonGlobalVar: " << global->isConstant() << endl;
     } else {
       global = TheModule->getGlobalVariable(name);
     }
@@ -492,7 +548,7 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     IndexValues[0] = llvm::ConstantInt::get(Builder->getInt32Ty(), Indices[0]);
 
     CType::CTypeKind baseTypeKind = ctype->base->kind;
-    std::cout << " base kind:" << CType::ctypeKindString(baseTypeKind);
+    output << " base kind:" << CType::ctypeKindString(baseTypeKind);
     if (addend == 0) {
       if (BaseValueTy->isIntegerTy ()) {
         return Base;
@@ -504,7 +560,7 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
       return llvm::ConstantExpr::getPointerCast(value, Ty);
       for (size_t i = Indices.size() - 1; i != size_t(0); --i) {
         int indice = Indices[i];
-        std::cout << " indice: " << indice;
+        output << " indice: " << indice;
 
         llvm::Constant *indVal = nullptr;
         if (indice) {
@@ -530,7 +586,7 @@ llvm::Constant *EmitIntegerInitialication(llvm::Type *destTy, CType *IntType, ch
   if (!rel) {
     return llvm::ConstantInt::get(destTy, read_buf(buf + offset, size));
   }
-  std::cout << "label: " << *rel->label << std::endl;
+  output << "label: " << *rel->label << std::endl;
   char **label = rel->label;
     char *name = *label;
   GlobalVariable *global = TheModule->getGlobalVariable(name);
@@ -595,20 +651,20 @@ static void InitializeModule(const string &moduleName) {
  * https://llvm.org/doxygen/classllvm_1_1GlobalVariable.html
  * https://www.llvm.org/doxygen/classllvm_1_1GlobalVariable.html
  */ 
-GlobalVariable *createGlobalVar(Ast *yucNode) {
+static GlobalVariable *createGlobalVar(Ast *yucNode) {
   string name = yucNode->name;
   CType *ctype = yucNode->type;
   if (ctype->kind == CType::TY_FUNC) {
     return nullptr;
   }
-  std::cout << "createGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
+  output << "createGlobalVar kind:" << CType::ctypeKindString(ctype->kind);
   if (ctype->base) {
-    std::cout << " base " << CType::ctypeKindString(ctype->base->kind);
+    output << " base " << CType::ctypeKindString(ctype->base->kind);
   }
   if (ctype->origin) {
-    std::cout << " origin " << CType::ctypeKindString(ctype->origin->kind);
+    output << " origin " << CType::ctypeKindString(ctype->origin->kind);
   }
-  std::cout << endl;
+  output << endl;
   // 获取全局变量的类型
   Type *DesiredType = yuc2LLVMType(ctype);
   // 注册全局变量
@@ -716,7 +772,7 @@ static AllocaInst *CreateMainEntryBlockAlloca(Function *TheFunction,
 
 static void StartFunction(Function *Fn, Ast *funcNode) {
   const char *name = Fn->getName().data();
-  cout << "StartFunction " << name << endl;
+  output << "\nStartFunction " << name << endl;
   BasicBlock *entry = BasicBlock::Create(*TheContext, "", Fn);
   Builder->SetInsertPoint(entry);
   if (!strcmp(name, "main")) {
@@ -726,7 +782,7 @@ static void StartFunction(Function *Fn, Ast *funcNode) {
 }
 
 static void FinishFunction(Function *Func, Ast *funcNode) {
-  cout << "FinishFunction " << endl;
+  output << "FinishFunction " << endl;
   CNode *end = getFuntionEnd(funcNode->body);
   CNode *ndCast = end->lhs;
   Type *returnType = Func->getReturnType();
@@ -736,7 +792,7 @@ static void FinishFunction(Function *Func, Ast *funcNode) {
 }
 
 static void prepareLocals(Function *Func, Ast *funcNode) {
-  cout << "prepareLocals start" << endl;
+  output << "prepareLocals start" << endl;
   // reverse locals
   vector <Ast *> locals;
   for (Ast *local = funcNode->locals; local; local = local->next) {
@@ -780,12 +836,10 @@ void buildFunction(Ast *funcNode) {
   if (!funcNode || funcNode->type->kind != CType::TY_FUNC) {
     return;
   }
-  cout << "buildFunction " << funcNode->name << endl;
   Function *fooFunc = createFunc(funcNode);
   if (!funcNode->is_definition) {
     return;
   }
-  cout << "is_function " << funcNode->is_function << endl;
   StartFunction(fooFunc, funcNode);
   buildFunctionBody(fooFunc, funcNode);
   FinishFunction(fooFunc, funcNode);
@@ -798,7 +852,6 @@ static void emit_text(Ast *ast) {
     return;
   }
   emit_text(fn->next);
-  std::cout << "\nemit_text name:" << fn->name << endl;
   buildFunction(fn);
 }
 
@@ -806,13 +859,13 @@ void processAnnonVar(Ast *ast) {
   if (ast) {
     processAnnonVar(ast->next);
     string name = ast->name;
-    std::cout << "cur name:" << name << endl;
+    output << "cur name:" << name << endl;
     annonInitData[name] = ast->init_data;
   }
 }
 
 void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
-  cout << "ir_gen start\n";
+  output << "ir_gen start\n";
   if (!ast) {
     std::cerr << "no ast" << std::endl;
     return;
@@ -838,6 +891,6 @@ void yuc::ir_gen(Ast *ast, std::ofstream &out, const string &moduleName) {
   emit_data(namedP);
   emit_text(namedP);
   TheModule->dump();
-  std::cout << "yuc end" << std::endl;
+  output << "yuc end" << std::endl;
 }
 
