@@ -165,19 +165,27 @@ static Value *gen_addr(CNode *node) {
   return Addr;
 }
 
-static void cast(CType *from, CType *to) {
-  string fromType = CType::ctypeKindString(from->kind);
-  string toType = CType::ctypeKindString(to->kind);
-  output << "fromType: " << fromType << " toType: " << toType << endl;
-  CType::CTypeKind fromKind = to->kind;
+static Value* cast(Value *Base, CType *from, CType *to) {
+  CType::CTypeKind fromKind = from->kind;
   CType::CTypeKind toKind = to->kind;
-  if (fromKind == CType::TY_VOID) {
-    return;
-  }
-  if (fromKind == CType::TY_ARRAY || toKind == CType::TY_PTR) {
-    
-  }
+  string fromType = CType::ctypeKindString(fromKind);
+  string toType = CType::ctypeKindString(toKind);
+  output << "fromType: " << fromType << " toType: " << toType << endl;
 
+  Value *target = Base;
+  if (fromKind == CType::TY_ARRAY && toKind == CType::TY_PTR) {
+    llvm::SmallVector<llvm::Constant*, 8> IndexValues;
+    Constant *ZERO = llvm::ConstantInt::get(Builder->getInt64Ty(), 0);
+    IndexValues.push_back(ZERO);
+    IndexValues.push_back(ZERO);
+
+    if (auto *array = dyn_cast<Constant>(Base)) {
+      Type *BaseValueTy = yuc2LLVMType(from);
+      target = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, array, IndexValues);
+    }
+  }
+  output << endl;
+  return target;
 }
 
 
@@ -199,6 +207,7 @@ static Value *gen_expr(CNode *node) {
   output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr) << endl; 
   cur_level++;
   Value *V = nullptr;
+  Value *casted = nullptr;
   switch(kind) {
     case CNode::CNodeKind::ND_NULL_EXPR:
       output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << endl;
@@ -228,7 +237,7 @@ static Value *gen_expr(CNode *node) {
       break;
     case CNode::CNodeKind::ND_CAST:
       V = gen_expr(node->lhs);
-      cast(node->lhs->type, node->type);
+      V = cast(V, node->lhs->type, node->type);
       break;
     case CNode::CNodeKind::ND_ADD:
       output << buildSeperator(cur_level, "ND_ADD:") << node->kind << endl;
@@ -544,7 +553,6 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, CType *ctype, c
     Constant *constant = global->getInitializer();
     Base = global;
     BaseValueTy = constant->getType();
-    BaseValueTy->dump();
     IndexValues[0] = llvm::ConstantInt::get(Builder->getInt32Ty(), Indices[0]);
 
     CType::CTypeKind baseTypeKind = ctype->base->kind;
