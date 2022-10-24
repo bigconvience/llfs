@@ -1,6 +1,3 @@
-int printf(const char *, ...);
-
-int main() {
-	printf("Hello world\n");
-	return 0;
+int add2(int x, int y) {
+  return x + y;
 }

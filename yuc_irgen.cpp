@@ -804,6 +804,9 @@ static void prepareLocals(Function *Func, Ast *funcNode) {
   // reverse locals
   vector <Ast *> locals;
   for (Ast *local = funcNode->locals; local; local = local->next) {
+    output << "local name" << local->name << endl;
+    if (local->name == "__alloca_size__")
+      continue;
     locals.push_back(local);
   }
   reverse(locals.begin(), locals.end());
@@ -836,7 +839,7 @@ static void buildFunctionBody(Function *Func, Ast *funcNode) {
   // BasicBlock *entry = BasicBlock::Create(*TheContext, "", Func);
   // Builder->SetInsertPoint(entry);
 
-  // prepareLocals(Func, funcNode);
+  prepareLocals(Func, funcNode);
   gen_stmt(funcNode->body);
 }
 
