@@ -32,6 +32,40 @@ static void gen_stmt(CNode *node);
 static Constant *yuc2Constants(Type *Ty, Ast *gvarNode);
 static GlobalVariable *createGlobalVar(Ast *yucNode);
 
+struct Scope {
+  struct Scope *prev;
+  std::map<string, llvm::Value *> Env;
+};
+
+static Scope globalScope = {}, *currentScope = &globalScope;
+
+static void enterScope() {
+  Scope *scope = new Scope();
+  scope->prev = currentScope;
+  currentScope = scope;
+}
+
+static void leaveScope() {
+
+}
+
+static void updateScopeVar(std::string Name, Value *value) {
+  currentScope->Env[Name] = value;
+}
+
+static Value *getScopeVar(std::string Name) {
+  Scope *cur = currentScope;
+  Value *val = nullptr;
+  while(cur) {
+    val = cur->Env[Name];
+    if (val) {
+      break;
+    }
+    cur = cur->prev;
+  }
+  return val;
+}
+
 Function *getFunction(std::string Name) {
   // First, see if the function has already been added to the current module.
   if (auto *F = TheModule->getFunction(Name))
@@ -153,11 +187,16 @@ static Value *gen_addr(CNode *node) {
     case CNode::CNodeKind::ND_VAR:
     Ast *var = node->var;
     string typeStr = CType::ctypeKindString(var->type->kind);
-    output << buildSeperator(cur_level, "var type:" + typeStr) << endl;
+    output << buildSeperator(cur_level, "var type:" + typeStr)
+      << " " << var->name << endl;
     string nameStr = var->name;
     if (isAnnonVar(nameStr)) {
       const std::string &Str = annonInitData[nameStr];
       Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
+    } else {
+      Value *originValue = getScopeVar(nameStr);
+      llvm::Type *type = yuc2LLVMType(var->type);
+      Addr = Builder->CreateLoad(type, originValue);
     }
     break;
   }
@@ -208,6 +247,7 @@ static Value *gen_expr(CNode *node) {
   cur_level++;
   Value *V = nullptr;
   Value *casted = nullptr;
+  Value *operandL, *operandR;
   switch(kind) {
     case CNode::CNodeKind::ND_NULL_EXPR:
       output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << endl;
@@ -240,7 +280,9 @@ static Value *gen_expr(CNode *node) {
       V = cast(V, node->lhs->type, node->type);
       break;
     case CNode::CNodeKind::ND_ADD:
-      output << buildSeperator(cur_level, "ND_ADD:") << node->kind << endl;
+      operandL = gen_expr(node->lhs);
+      operandR = gen_expr(node->rhs);
+      // V = Builder->CreateNSWAdd(operandL, operandR);
       break;
     case CNode::CNodeKind::ND_FUNCALL: {
       std::vector<Value *> ArgsV = push_args(node);
@@ -280,6 +322,9 @@ static void gen_stmt(CNode *node) {
 
     case CNode::CNodeKind::ND_RETURN:
       output << buildSeperator(level+1, kindStr) << "\n"; 
+      if (node->lhs) {
+        gen_expr(node->lhs);
+      }
       break;
     default:
       output << buildSeperator(level+1, kindStr) << endl;
@@ -787,6 +832,7 @@ static void StartFunction(Function *Fn, Ast *funcNode) {
     AllocaInst *Alloca = CreateMainEntryBlockAlloca(Fn, "");
     Builder->CreateStore(Builder->getInt32(0), Alloca);
   }
+  enterScope();
 }
 
 static void FinishFunction(Function *Func, Ast *funcNode) {
@@ -816,6 +862,7 @@ static void prepareLocals(Function *Func, Ast *funcNode) {
     Type *localType = yuc2LLVMType(local->type);
     Value *localAddr = Builder->CreateAlloca(localType, nullptr);
     LocallAddress[local->offset] = localAddr;
+    updateScopeVar(local->name, localAddr);
   }
 
   // reverse args
