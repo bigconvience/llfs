@@ -38,6 +38,7 @@ struct Scope {
 };
 
 static Scope globalScope = {}, *currentScope = &globalScope;
+static Value *retValue;
 
 static void enterScope() {
   Scope *scope = new Scope();
@@ -282,7 +283,11 @@ static Value *gen_expr(CNode *node) {
     case CNode::CNodeKind::ND_ADD:
       operandL = gen_expr(node->lhs);
       operandR = gen_expr(node->rhs);
-      // V = Builder->CreateNSWAdd(operandL, operandR);
+      if (node->type->is_unsigned) {
+        V = Builder->CreateNUWAdd(operandL, operandR);
+      } else {
+        V = Builder->CreateNSWAdd(operandL, operandR);
+      }
       break;
     case CNode::CNodeKind::ND_FUNCALL: {
       std::vector<Value *> ArgsV = push_args(node);
@@ -323,7 +328,7 @@ static void gen_stmt(CNode *node) {
     case CNode::CNodeKind::ND_RETURN:
       output << buildSeperator(level+1, kindStr) << "\n"; 
       if (node->lhs) {
-        gen_expr(node->lhs);
+        retValue = gen_expr(node->lhs);
       }
       break;
     default:
@@ -795,16 +800,6 @@ void setFuncArgs(Function *Func, std::vector<std::string> FuncArgs) {
     }
 }
 
-static Value *getValue(CNode *node, Type *returnType) {
-  cout<< "getValue kind:" << CNode::node_kind_info(node->kind) << endl;
-  switch(node->kind) {
-    case CNode::CNodeKind::ND_NUM:
-      return Builder->getInt32(node->val);
-      break;
-  }
-  return NULL;
-}
-
 /// CreateEntryBlockAlloca - Create an alloca instruction in the entry block of
 /// the function.  This is used for mutable variables etc.
 static AllocaInst *CreateEntryBlockAlloca(Function *TheFunction,
@@ -837,12 +832,8 @@ static void StartFunction(Function *Fn, Ast *funcNode) {
 
 static void FinishFunction(Function *Func, Ast *funcNode) {
   output << "FinishFunction " << endl;
-  CNode *end = getFuntionEnd(funcNode->body);
-  CNode *ndCast = end->lhs;
   Type *returnType = Func->getReturnType();
-  CNode *ndReturn = ndCast->lhs;
-  Value *val = getValue(ndReturn, returnType);
-  Builder->CreateRet(val);
+  Builder->CreateRet(retValue);
 }
 
 static void prepareLocals(Function *Func, Ast *funcNode) {
