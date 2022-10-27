@@ -289,6 +289,15 @@ static Value *gen_expr(CNode *node) {
         V = Builder->CreateNSWAdd(operandL, operandR);
       }
       break;
+    case CNode::CNodeKind::ND_SUB:
+      operandL = gen_expr(node->lhs);
+      operandR = gen_expr(node->rhs);
+      if (node->type->is_unsigned) {
+        V = Builder->CreateNUWSub(operandL, operandR);
+      } else {
+        V = Builder->CreateNSWSub(operandL, operandR);
+      }
+      break;
     case CNode::CNodeKind::ND_FUNCALL: {
       std::vector<Value *> ArgsV = push_args(node);
       string Callee = node->lhs->var->name;
