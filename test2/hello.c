@@ -1,3 +1,3 @@
-int add2(int x, int y) {
-  return x + y;
+int addx(int *x, int y) {
+  return *x + y;
 }

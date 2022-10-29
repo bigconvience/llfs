@@ -177,6 +177,11 @@ static string buildSeperator(int count, string target) {
   return result;
 }
 
+static Value* load(CType *ty, Value *originValue) {
+  llvm::Type *type = yuc2LLVMType(ty);
+  return Builder->CreateLoad(type, originValue);
+}
+
 static Value *gen_addr(CNode *node) {
   int cur_level = ++stmt_level;
   cur_level++;
@@ -275,6 +280,10 @@ static Value *gen_expr(CNode *node) {
       break;
     case CNode::CNodeKind::ND_VAR:
       V = gen_addr(node);
+      break;
+    case CNode::CNodeKind::ND_DEREF:
+      V = gen_expr(node->lhs);
+      V = load(node->type, V);
       break;
     case CNode::CNodeKind::ND_CAST:
       V = gen_expr(node->lhs);
