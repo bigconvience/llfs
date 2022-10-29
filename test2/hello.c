@@ -1,3 +1,3 @@
-int addx(int *x, int y) {
-  return *x + y;
+int sub_short(short a, short b, short c) {
+  return a - b - c;
 }

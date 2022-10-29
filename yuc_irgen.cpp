@@ -215,6 +215,7 @@ static Value* cast(Value *Base, CType *from, CType *to) {
   CType::CTypeKind toKind = to->kind;
   string fromType = CType::ctypeKindString(fromKind);
   string toType = CType::ctypeKindString(toKind);
+  Type *targetTy = yuc2LLVMType(to);
   output << "fromType: " << fromType << " toType: " << toType << endl;
 
   Value *target = Base;
@@ -228,6 +229,15 @@ static Value* cast(Value *Base, CType *from, CType *to) {
       Type *BaseValueTy = yuc2LLVMType(from);
       target = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, array, IndexValues);
     }
+  } else if ((fromKind == CType::TY_CHAR || fromKind == CType::TY_SHORT)
+      && toKind == CType::TY_INT ) {
+    if (to->is_unsigned) {
+      target = Builder->CreateSExt(Base, targetTy);
+    } else {
+      target = Builder->CreateZExt(Base, targetTy);
+    }
+  } else if (fromKind == CType::TY_LONG && toKind == CType::TY_INT) {
+    target = Builder->CreateTrunc(Base, targetTy);
   }
   output << endl;
   return target;
