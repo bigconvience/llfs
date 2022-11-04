@@ -32,6 +32,9 @@ static void gen_stmt(CNode *node);
 static Constant *yuc2Constants(Type *Ty, Ast *gvarNode);
 static GlobalVariable *createGlobalVar(Ast *yucNode);
 
+static std::map<Ast*, Value*> localVars;
+static std::map<Ast*, Value*> globalVars;
+
 struct Scope {
   struct Scope *prev;
   std::map<string, llvm::Value *> Env;
@@ -54,18 +57,18 @@ static void updateScopeVar(std::string Name, Value *value) {
   currentScope->Env[Name] = value;
 }
 
-static Value *getScopeVar(std::string Name) {
-  Scope *cur = currentScope;
-  Value *val = nullptr;
-  while(cur) {
-    val = cur->Env[Name];
-    if (val) {
-      break;
-    }
-    cur = cur->prev;
-  }
-  return val;
+static Value *getScopeVar(Ast *var) {
+  return localVars[var];
 }
+
+static Value *getGlobalVar(Ast *var) {
+  return globalVars[var];
+}
+
+static void putScopeVar(Ast *var, Value *V) {
+  localVars[var] = V;
+}
+
 
 Function *getFunction(std::string Name) {
   // First, see if the function has already been added to the current module.
@@ -200,7 +203,10 @@ static Value *gen_addr(CNode *node) {
       const std::string &Str = annonInitData[nameStr];
       Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
     } else {
-      Value *originValue = getScopeVar(nameStr);
+      Value *originValue = getScopeVar(var);
+      if (!originValue) {
+        output << " empty originValue " << endl;
+      }
       llvm::Type *type = yuc2LLVMType(var->type);
       Addr = Builder->CreateLoad(type, originValue);
     }
@@ -322,13 +328,15 @@ static Value *gen_expr(CNode *node) {
       string Callee = node->lhs->var->name;
       output << buildSeperator(cur_level, Callee) << endl;
       Function *CalleeF = getFunction(Callee);
-      assert(CalleeF && "Unkonw function referenced");
       V = Builder->CreateCall(CalleeF, ArgsV, "");
       break;
     }
-
+    case CNode::CNodeKind::ND_LT:
+      gen_expr(node->lhs);
+      gen_expr(node->rhs);
       break;
-
+    default:
+      break;
   }
   stmt_level--;
   cur_level--;
@@ -344,6 +352,10 @@ static void gen_stmt(CNode *node) {
   output << buildSeperator(level, "gen_stmt start:") << " "<< cur_count << endl;
   output << buildSeperator(level, kindStr) << endl;
   switch(kind) {
+    case CNode::CNodeKind::ND_IF:
+      gen_expr(node->cond);
+      
+      break;
     case CNode::CNodeKind::ND_BLOCK: // 32
       for (CNode *n = node->body; n; n = n->next) {
         gen_stmt(n);
@@ -846,18 +858,6 @@ static AllocaInst *CreateMainEntryBlockAlloca(Function *TheFunction,
   return CreateEntryBlockAlloca(TheFunction, VarName, Type::getInt32Ty(*TheContext));
 }
 
-static void StartFunction(Function *Fn, Ast *funcNode) {
-  const char *name = Fn->getName().data();
-  output << "\nStartFunction " << name << endl;
-  BasicBlock *entry = BasicBlock::Create(*TheContext, "", Fn);
-  Builder->SetInsertPoint(entry);
-  if (!strcmp(name, "main")) {
-    AllocaInst *Alloca = CreateMainEntryBlockAlloca(Fn, "");
-    Builder->CreateStore(Builder->getInt32(0), Alloca);
-  }
-  enterScope();
-}
-
 static void FinishFunction(Function *Func, Ast *funcNode) {
   output << "FinishFunction " << endl;
   Type *returnType = Func->getReturnType();
@@ -869,17 +869,22 @@ static void prepareLocals(Function *Func, Ast *funcNode) {
   // reverse locals
   vector <Ast *> locals;
   for (Ast *local = funcNode->locals; local; local = local->next) {
-    output << "local name" << local->name << endl;
-    if (local->name == "__alloca_size__")
-      continue;
+    output << "local name: " << local->name << endl;
     locals.push_back(local);
   }
   reverse(locals.begin(), locals.end());
   // allocal local variables and args
   for (vector<Ast *>::iterator iter = locals.begin(); iter != locals.end(); iter++) {
     Ast *local = (*iter);
+    string varName = local->name;
+    output << "local name: " << varName << endl;
+    if (varName == "__alloca_size__" || varName == "__va_area__") {
+      continue;
+    }
     Type *localType = yuc2LLVMType(local->type);
     Value *localAddr = Builder->CreateAlloca(localType, nullptr);
+    putScopeVar(local, localAddr);
+
     LocallAddress[local->offset] = localAddr;
     updateScopeVar(local->name, localAddr);
   }
@@ -900,12 +905,29 @@ static void prepareLocals(Function *Func, Ast *funcNode) {
   }
 }
 
+static void StartFunction(Function *Fn, Ast *funcNode) {
+  const char *name = Fn->getName().data();
+  output << "\nStartFunction " << name << endl;
+  BasicBlock *entry = BasicBlock::Create(*TheContext, "", Fn);
+  Builder->SetInsertPoint(entry);
+
+  AllocaInst *defaultAlloca;
+  if (!strcmp(name, "main")) {
+    defaultAlloca = CreateMainEntryBlockAlloca(Fn, "");
+  }
+  prepareLocals(Fn, funcNode);
+
+  if (defaultAlloca) {
+    Builder->CreateStore(Builder->getInt32(0), defaultAlloca);
+  }
+
+  enterScope();
+}
 
 static void buildFunctionBody(Function *Func, Ast *funcNode) {
   // BasicBlock *entry = BasicBlock::Create(*TheContext, "", Func);
   // Builder->SetInsertPoint(entry);
 
-  prepareLocals(Func, funcNode);
   gen_stmt(funcNode->body);
 }
 

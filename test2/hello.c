@@ -1,3 +1,9 @@
-int sub_short(short a, short b, short c) {
-  return a - b - c;
+int main() { 
+    int x; 
+    if (x < 0) {
+        x = 2;
+    } else {
+        x = 4;
+    } 
+    return x;
 }
