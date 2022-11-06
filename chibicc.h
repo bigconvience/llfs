@@ -20,6 +20,7 @@
 #include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
+#include <string>
 
 #define MAX(x, y) ((x) < (y) ? (y) : (x))
 #define MIN(x, y) ((x) < (y) ? (x) : (y))
@@ -464,4 +465,167 @@ extern bool opt_fpic;
 extern bool opt_fcommon;
 extern char *base_file;
 
+
+// generate llvm ir
+void gen_ir(Obj *prog, const std::string &file_name);
+
+static std::string ctypeKindString(TypeKind kind) {
+  std::string kindStr;
+  switch(kind) {
+    case TY_VOID:
+      kindStr = "TY_VOID";
+      break;
+    case TY_BOOL:
+      kindStr = "TY_BOOL";
+      break;
+    case TY_CHAR:
+      kindStr = "TY_CHAR";
+      break;
+    case TY_SHORT:
+      kindStr = "TY_SHORT";
+      break;
+    case TY_INT:
+      kindStr = "TY_INT";
+      break;
+    case TY_LONG:
+      kindStr = "TY_LONG";
+      break;
+    case TY_FLOAT:
+      kindStr = "TY_FLOAT";
+      break;
+    case TY_DOUBLE:
+      kindStr = "TY_DOUBLE";
+      break;
+    case TY_LDOUBLE:
+      kindStr = "TY_LDOUBLE";
+      break;
+    case TY_ENUM:
+      kindStr = "TY_ENUM";
+      break;
+    case TY_PTR:
+      kindStr = "TY_PTR";
+      break;
+    case TY_FUNC:
+      kindStr = "TY_FUNC";
+      break;
+    case TY_ARRAY:
+      kindStr = "TY_ARRAY";
+      break;
+    case TY_VLA:
+      kindStr = "TY_VLA";
+      break;
+    case TY_STRUCT:
+      kindStr = "struct";
+      break;
+    case TY_UNION:
+      kindStr = "union";
+      break;
+    default:
+      kindStr = "unknow type kind";
+      break;
+    }
+  return kindStr;
+}
+
+static std::string node_kind_info(NodeKind kind) {
+  switch(kind) {
+    case ND_NULL_EXPR:
+      return "ND_NULL_EXPR";
+    case ND_ADD:
+      return "ND_ADD";
+    case ND_SUB:
+      return "ND_SUB";
+    case ND_MUL:
+      return "ND_MUL";
+    case ND_DIV:
+      return "ND_DIV";
+    case ND_NEG:
+      return "ND_NEG";
+    case ND_MOD:
+      return "ND_MOD";
+    case ND_BITAND:
+      return "ND_BITAND";
+    case ND_BITOR:
+      return "ND_BITOR";
+    case ND_BITXOR:
+      return "ND_BITXOR";
+    case ND_SHL:
+      return "ND_SHL";
+    case ND_SHR:
+      return "ND_SHR";
+    case ND_EQ:
+      return "ND_EQ";
+    case ND_NE:
+      return "ND_NE";
+    case ND_LT:
+      return "ND_LT";
+    case ND_LE:
+      return "ND_LE";
+    case ND_ASSIGN:
+      return "ND_ASSIGN";
+    case ND_COND:
+      return "ND_COND";
+    case ND_COMMA:
+      return "ND_COMMA";
+    case ND_MEMBER:
+      return "ND_MEMBER";
+    case ND_ADDR:
+      return "ND_ADDR";
+    case ND_DEREF:
+      return "ND_DEREF";
+    case ND_NOT:
+      return "ND_NOT";
+    case ND_BITNOT:
+      return "ND_BITNOT";
+    case ND_LOGAND:
+      return "ND_LOGAND";
+    case ND_LOGOR:
+      return "ND_LOGOR";
+    case ND_RETURN:
+      return "ND_RETURN";
+    case ND_IF:
+      return "ND_IF";
+    case ND_DO:
+      return "ND_DO";
+    case ND_SWITCH:
+      return "ND_SWITCH";
+    case ND_CASE:
+      return "ND_CASE";
+    case ND_BLOCK:
+      return "ND_BLOCK";
+    case ND_GOTO:
+      return "ND_GOTO";
+    case ND_GOTO_EXPR:
+      return "ND_GOTO_EXPR";
+    case ND_LABEL:
+      return "ND_LABEL";
+    case ND_LABEL_VAL:
+      return "ND_LABEL_VAL";
+    case ND_FUNCALL:
+      return "ND_FUNCALL";
+    case ND_EXPR_STMT:
+      return "ND_EXPR_STMT";
+    case ND_STMT_EXPR:
+      return "ND_STMT_EXPR";
+    case ND_VAR:
+      return "ND_VAR";
+    case ND_VLA_PTR:
+      return "ND_VLA_PTR";
+    case ND_NUM:
+      return "ND_NUM";
+    case ND_CAST:
+      return "ND_CAST";
+    case ND_MEMZERO:
+      return "ND_MEMZERO";
+    case ND_ASM:
+      return "ND_ASM";
+    case ND_CAS:
+      return "ND_CAS";
+    case ND_EXCH:
+      return "ND_EXCH";
+    
+    default:
+      return "unkonw";
+  }
+}
 #endif

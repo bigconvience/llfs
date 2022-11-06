@@ -1,5 +1,4 @@
 #include "chibicc.h"
-#include "chibi2yuc.h"
 
 using namespace std;
 
@@ -1599,5 +1598,7 @@ void codegen(Obj *prog, FILE *out) {
   emit_data(prog);
   emit_text(prog);
 
-  codegen_yuc(prog, filename);
+  // codegen_yuc(prog, filename);
+
+  gen_ir(prog, filename);
 }
