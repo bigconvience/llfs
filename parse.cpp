@@ -109,6 +109,8 @@ static Node *current_switch;
 
 static Obj *builtin_alloca;
 
+static int retCount;
+
 static bool is_typename(Token *tok);
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
 static Type *get_typename(Token **rest, Token *tok);
@@ -1554,6 +1556,7 @@ static Node *asm_stmt(Token **rest, Token *tok) {
 //      | expr-stmt
 static Node *stmt(Token **rest, Token *tok) {
   if (equal(tok, "return")) {
+    retCount++;
     Node *node = new_node(ND_RETURN, tok);
     if (consume(rest, tok->next, ";"))
       return node;
@@ -3250,6 +3253,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   if (consume(&tok, tok, ";"))
     return tok;
 
+  retCount = 0;
   current_fn = fn;
   locals = NULL;
   enter_scope();
@@ -3281,6 +3285,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
 
   fn->body = compound_stmt(&tok, tok);
   fn->locals = locals;
+  fn->retCount = retCount;
   leave_scope();
   resolve_goto_labels();
   return tok;

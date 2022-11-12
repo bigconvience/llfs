@@ -74,8 +74,8 @@ static IRGenModule &CGM();
 static llvm::Value *gen_expr(Node *node);
 static void gen_stmt(Node *node);
 
-static llvm::Value *retValue;
-static bool loadReturn;
+static llvm::Value *retValue = nullptr;
+static llvm::Value *allocatedRetValue = nullptr;
 
 static bool isAnnonVar(std::string &name) {
   int index = name.find(".L..");
@@ -291,7 +291,6 @@ static void gen_stmt(Node *node) {
       output << buildSeperator(level+1, kindStr) << std::endl; 
       if (node->lhs) {
         retValue = gen_expr(node->lhs);
-        loadReturn = false;
       }
       break;
     default:
@@ -809,10 +808,22 @@ static llvm::AllocaInst *CreateMainEntryBlockAlloca(llvm::Function *TheFunction,
 
 static void FinishFunction(llvm::Function *Func, Obj *funcNode) {
   llvm::Type *returnType = Func->getReturnType();
-  Builder->CreateRet(retValue);
+  llvm::Value *finalRetValue = retValue;
+  if (allocatedRetValue) {
+    finalRetValue = Builder->CreateLoad(returnType, allocatedRetValue);   
+  }
+  Builder->CreateRet(finalRetValue);
 }
 
 static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
+  retValue = nullptr;
+  allocatedRetValue = nullptr;
+
+  if (funcNode->retCount > 1) {
+    llvm::Type *returnType = Func->getReturnType();
+    allocatedRetValue = Builder->CreateAlloca(returnType, nullptr);
+  }
+
   std::vector<Obj *> locals;
    for (Obj *local = funcNode->locals; local; local = local->next) {
     output << "start local name: " << local->name << std::endl;

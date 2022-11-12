@@ -158,6 +158,7 @@ struct Obj {
   Obj *va_area;
   Obj *alloca_bottom;
   int stack_size;
+  int retCount;
 
   // Static inline function
   bool is_live;
