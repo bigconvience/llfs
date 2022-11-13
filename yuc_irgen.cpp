@@ -191,6 +191,9 @@ static llvm::Value *gen_expr(Node *node) {
   llvm::Value *V = nullptr;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
+  Type* nodeType = node->ty;
+  TypeKind typeKind = nodeType->kind;
+  llvm::CmpInst::Predicate predicate;
   switch(kind) {
     case ND_NULL_EXPR:
       output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << std::endl;
@@ -211,6 +214,7 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_NUM:
       output << buildSeperator(cur_level, "ND_NUM:") << node->kind << std::endl;
+      V = llvm::ConstantInt::get(yuc2LLVMType(nodeType), node->val);;
       break;
     case ND_MEMZERO:
       output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << std::endl;
@@ -252,9 +256,64 @@ static llvm::Value *gen_expr(Node *node) {
       V = Builder->CreateCall(CalleeF, ArgsV, "");
       break;
     }
+    case ND_EQ:
+    case ND_NE:
     case ND_LT:
-      gen_expr(node->lhs);
-      gen_expr(node->rhs);
+    case ND_LE:
+      operandL = gen_expr(node->lhs);
+      operandR = gen_expr(node->rhs);
+
+      if (kind == ND_EQ) {
+        if (isFloatTypeKind(typeKind)) {
+          if (nodeType->is_unsigned) {
+            predicate = llvm::CmpInst::Predicate::FCMP_UEQ;
+          } else {
+            predicate = llvm::CmpInst::Predicate::FCMP_OEQ;
+          }
+        } else {
+          predicate = llvm::CmpInst::Predicate::ICMP_EQ;
+        }
+      } else if (kind == ND_NE) {
+        if (isFloatTypeKind(typeKind)) {
+          if (nodeType->is_unsigned) {
+            predicate = llvm::CmpInst::Predicate::FCMP_UNE;
+          } else {
+            predicate = llvm::CmpInst::Predicate::FCMP_ONE;
+          }
+        } else {
+          predicate = llvm::CmpInst::Predicate::ICMP_NE;
+        }
+      } else if (kind == ND_LT) {
+        if (isFloatTypeKind(typeKind)) {
+          if (nodeType->is_unsigned) {
+            predicate = llvm::CmpInst::Predicate::FCMP_ULT;
+          } else {
+            predicate = llvm::CmpInst::Predicate::FCMP_OLT;
+          }
+        } else {
+          if (nodeType->is_unsigned) {
+            predicate = llvm::CmpInst::Predicate::ICMP_ULT;
+          } else {
+            predicate = llvm::CmpInst::Predicate::ICMP_SLT;
+          }
+        }
+      } else if (kind == ND_LE) {
+        if (isFloatTypeKind(typeKind)) {
+          if (nodeType->is_unsigned) {
+            predicate = llvm::CmpInst::Predicate::FCMP_ULE;
+          } else {
+            predicate = llvm::CmpInst::Predicate::FCMP_OLE;
+          }
+        } else {
+          if (nodeType->is_unsigned) {
+            predicate = llvm::CmpInst::Predicate::ICMP_ULE;
+          } else {
+            predicate = llvm::CmpInst::Predicate::ICMP_SLE;
+          }
+        }
+      }
+
+      V = Builder->CreateCmp(predicate, operandL, operandR);
       break;
     default:
       break;
@@ -263,6 +322,14 @@ static llvm::Value *gen_expr(Node *node) {
   cur_level--;
   output << buildSeperator(cur_level, "gen_expr end") << std::endl;
   return V;
+}
+
+static void gen_if(Node *node) {
+  llvm::Value *condValue = gen_expr(node->cond);
+      
+  gen_stmt(node->then);
+  if (node->els)
+    gen_stmt(node->els); 
 }
 
 static void gen_stmt(Node *node) {
@@ -275,8 +342,7 @@ static void gen_stmt(Node *node) {
   output << buildSeperator(level, kindStr) << std::endl;
   switch(kind) {
     case ND_IF:
-      gen_expr(node->cond);
-      
+      gen_if(node);
       break;
     case ND_BLOCK: // 32
       for (Node *n = node->body; n; n = n->next) {

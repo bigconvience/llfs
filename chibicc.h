@@ -470,6 +470,10 @@ extern char *base_file;
 // generate llvm ir
 void gen_ir(Obj *prog, const std::string &file_name);
 
+static bool isFloatTypeKind(TypeKind kind) {
+  return kind == TY_FLOAT || kind == TY_DOUBLE;
+}
+
 static std::string ctypeKindString(TypeKind kind) {
   std::string kindStr;
   switch(kind) {
