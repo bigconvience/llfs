@@ -30,6 +30,7 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode);
 static llvm::Type *yuc2LLVMType(Type *ctype);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
+static std::map<Obj *, llvm::Constant*> globalVars;
 
 static llvm::Value *getScopeVar(Obj *var) {
   return scopeVars[var];
@@ -37,6 +38,25 @@ static llvm::Value *getScopeVar(Obj *var) {
 
 static void putScopeVar(Obj *var, llvm::Value *V) {
   scopeVars[var] = V;
+}
+
+static llvm::Constant *getGlobalVar(Obj *var) {
+  return globalVars[var];
+}
+
+static void putGlobalVar(Obj *var, llvm::Constant *V) {
+  globalVars[var] = V;
+}
+
+static llvm::Value *findVar(Obj *var) {
+  if (scopeVars[var]) {
+    return scopeVars[var];
+  }
+  return globalVars[var];
+}
+
+static void clearScopeVars() {
+  scopeVars.clear();
 }
 
 static llvm::Function *getFunction(std::string Name) {
@@ -120,19 +140,23 @@ static llvm::Value *gen_addr(Node *node) {
     case NodeKind::ND_VAR:
     Obj *var = node->var;
     std::string typeStr = ctypeKindString(var->ty->kind);
+    std::string varName = var->name;
     output << buildSeperator(cur_level, "var type:" + typeStr)
-      << " " << var->name << std::endl;
-    std::string nameStr = var->name;
-    if (isAnnonVar(nameStr)) {
-      const std::string &Str = annonInitData[nameStr];
+      << " " << varName << std::endl;
+    if (isAnnonVar(varName)) {
+      const std::string &Str = annonInitData[varName];
       Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
-    } else {
+    } else if (var->is_local){
       llvm::Value *originValue = getScopeVar(var);
       if (!originValue) {
         output << " empty originValue " << std::endl;
       }
       llvm::Type *type = yuc2LLVMType(var->ty);
       Addr = Builder->CreateLoad(type, originValue);
+    } else {
+      llvm::Constant *globalVar = getGlobalVar(var);
+      llvm::Type *type = yuc2LLVMType(var->ty);
+      Addr = TheModule->getNamedGlobal(varName);
     }
     break;
   }
@@ -225,6 +249,9 @@ static llvm::Value *gen_expr(Node *node) {
     case ND_DEREF:
       V = gen_expr(node->lhs);
       V = load(node->ty, V);
+      break;
+    case ND_ADDR:
+      V = gen_addr(node->lhs);
       break;
     case ND_CAST:
       V = gen_expr(node->lhs);
@@ -747,6 +774,9 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, Type *ctype, ch
 
 llvm::Constant *EmitIntegerInitialication(llvm::Type *destTy, Type *IntType, char *buf, int offset, Relocation *rel) {
   int size = IntType->size;
+  if (!buf) {
+    return llvm::ConstantInt::get(destTy, 0);
+  }
   if (!rel) {
     return llvm::ConstantInt::get(destTy, read_buf(buf + offset, size));
   }
@@ -842,6 +872,7 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
   }
 
   llvm::Constant *initializer = yuc2Constants(DesiredType, yucNode);
+  putGlobalVar(yucNode, initializer);
   gVar->setInitializer(initializer);
   gVar->setLinkage(yuc2LinkageType(yucNode));
   return gVar;
@@ -918,12 +949,13 @@ static void FinishFunction(llvm::Function *Func, Obj *funcNode) {
     finalRetValue = Builder->CreateLoad(returnType, allocatedRetValue);   
   }
   Builder->CreateRet(finalRetValue);
+
+  retValue = nullptr;
+  allocatedRetValue = nullptr;
+  clearScopeVars();
 }
 
 static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
-  retValue = nullptr;
-  allocatedRetValue = nullptr;
-
   if (funcNode->retCount > 1) {
     llvm::Type *returnType = Func->getReturnType();
     allocatedRetValue = Builder->CreateAlloca(returnType, nullptr);
