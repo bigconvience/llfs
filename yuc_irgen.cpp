@@ -325,11 +325,45 @@ static llvm::Value *gen_expr(Node *node) {
 }
 
 static void gen_if(Node *node) {
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  
   llvm::Value *condValue = gen_expr(node->cond);
-      
+  llvm::BasicBlock *ThenBB = llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction);
+  llvm::BasicBlock *ElseBB = node->els ? llvm::BasicBlock::Create(CGM().getLLVMContext()) : nullptr;
+  llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+
+  Builder->CreateCondBr(condValue, ThenBB, ElseBB ? ElseBB : MergeBB);
+  
+  Builder->SetInsertPoint(ThenBB);
   gen_stmt(node->then);
-  if (node->els)
-    gen_stmt(node->els); 
+  Builder->CreateBr(MergeBB);
+  ThenBB = Builder->GetInsertBlock();
+
+  if (ElseBB) {
+    // Emit else block.
+    TheFunction->getBasicBlockList().push_back(ElseBB);
+    Builder->SetInsertPoint(ElseBB);
+    gen_stmt(node->els);
+    Builder->CreateBr(MergeBB);
+    // Codegen of 'Else' can change the current block, update ElseBB for the PHI.
+    ElseBB = Builder->GetInsertBlock();
+  }
+
+  // Emit merge block.
+  TheFunction->getBasicBlockList().push_back(MergeBB);
+  Builder->SetInsertPoint(MergeBB);
+}
+
+static void gen_return(Node *node) {
+  if (!node->lhs) {
+    return;
+  }
+  llvm::Value *tmpV = gen_expr(node->lhs);
+  if (allocatedRetValue) {
+    Builder->CreateStore(tmpV, allocatedRetValue);
+  } else{
+    retValue = tmpV;
+  }
 }
 
 static void gen_stmt(Node *node) {
@@ -340,6 +374,7 @@ static void gen_stmt(Node *node) {
   output << "stmt " << std::endl;
   output << buildSeperator(level, "gen_stmt start:") << " "<< cur_count << std::endl;
   output << buildSeperator(level, kindStr) << std::endl;
+  llvm::Value *tmpV;
   switch(kind) {
     case ND_IF:
       gen_if(node);
@@ -355,9 +390,7 @@ static void gen_stmt(Node *node) {
 
     case ND_RETURN:
       output << buildSeperator(level+1, kindStr) << std::endl; 
-      if (node->lhs) {
-        retValue = gen_expr(node->lhs);
-      }
+      gen_return(node);
       break;
     default:
       output << buildSeperator(level+1, kindStr) << std::endl;
@@ -876,6 +909,12 @@ static void FinishFunction(llvm::Function *Func, Obj *funcNode) {
   llvm::Type *returnType = Func->getReturnType();
   llvm::Value *finalRetValue = retValue;
   if (allocatedRetValue) {
+    llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+    llvm::BasicBlock *ReturnBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+    Builder->CreateBr(ReturnBB);
+
+    TheFunction->getBasicBlockList().push_back(ReturnBB);
+    Builder->SetInsertPoint(ReturnBB);
     finalRetValue = Builder->CreateLoad(returnType, allocatedRetValue);   
   }
   Builder->CreateRet(finalRetValue);
