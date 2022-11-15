@@ -186,11 +186,13 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   } else if ((fromKind == TY_CHAR || fromKind == TY_SHORT)
       && toKind == TY_INT ) {
     if (to->is_unsigned) {
-      target = Builder->CreateSExt(Base, targetTy);
-    } else {
       target = Builder->CreateZExt(Base, targetTy);
+    } else {
+      target = Builder->CreateSExt(Base, targetTy);
     }
   } else if (fromKind == TY_LONG && toKind == TY_INT) {
+    target = Builder->CreateTrunc(Base, targetTy);
+  } else if (fromKind == TY_INT && toKind == TY_CHAR) {
     target = Builder->CreateTrunc(Base, targetTy);
   }
   output << std::endl;
@@ -273,6 +275,24 @@ static llvm::Value *gen_expr(Node *node) {
         V = Builder->CreateNUWSub(operandL, operandR);
       } else {
         V = Builder->CreateNSWSub(operandL, operandR);
+      }
+      break;
+    case ND_MUL:
+      operandL = gen_expr(node->lhs);
+      operandR = gen_expr(node->rhs);
+      if (node->ty->is_unsigned) {
+        V = Builder->CreateNUWAdd(operandL, operandR);
+      } else {
+        V = Builder->CreateNSWAdd(operandL, operandR);
+      }
+      break;
+    case ND_DIV:
+      operandL = gen_expr(node->lhs);
+      operandR = gen_expr(node->rhs);
+      if (node->ty->is_unsigned) {
+        V = Builder->CreateUDiv(operandL, operandR);
+      } else {
+        V = Builder->CreateSDiv(operandL, operandR);
       }
       break;
     case ND_FUNCALL: {
@@ -516,6 +536,9 @@ static llvm::Type *yuc2LLVMType(Type *ctype) {
       << ctypeKindString(ctype->kind) << std::endl;
   llvm::Type *type;
   switch (ctype->kind) {
+    case TY_BOOL:
+      type = Builder->getInt1Ty();
+      break;
     case TY_CHAR:
       type = Builder->getInt8Ty();
       break;
@@ -903,6 +926,32 @@ static llvm::FunctionType * buildFunctionType(Obj *funcNode) {
   return functionType;
 }
 
+static void ConstructAttributeList(llvm::AttributeList &AttrList) {
+  llvm::AttrBuilder FuncAttrs(CGM().getLLVMContext());
+  llvm::AttrBuilder RetAttrs(CGM().getLLVMContext());
+  llvm::AttrBuilder Attrs(CGM().getLLVMContext());
+
+  FuncAttrs.addAttribute(llvm::Attribute::SExt);
+  RetAttrs.addAttribute(llvm::Attribute::ZExt);
+
+  llvm::SmallVector<llvm::AttributeSet, 4> ArgAttrs(1);
+  Attrs.addAttribute(llvm::Attribute::ZExt);
+  Attrs.addAttribute(llvm::Attribute::NoUndef);
+  
+  ArgAttrs[0] =
+            llvm::AttributeSet::get(CGM().getLLVMContext(), Attrs);
+
+  AttrList = llvm::AttributeList::get(
+      CGM().getLLVMContext(), llvm::AttributeSet::get(CGM().getLLVMContext(), FuncAttrs),
+      llvm::AttributeSet::get(CGM().getLLVMContext(), RetAttrs), ArgAttrs);
+}
+
+static void SetLLVMFunctionAttributes(llvm::Function *F) {
+  llvm::AttributeList PAL;
+  ConstructAttributeList(PAL);
+  F->setAttributes(PAL);
+}
+
 static llvm::Function *createFunc(Obj *funcNode) {
   llvm::FunctionType *funcType = buildFunctionType(funcNode);
   std::string funcName = funcNode->name;
@@ -1031,6 +1080,7 @@ static void buildFunction(Obj *funcNode) {
     return;
   }
   llvm::Function *fooFunc = createFunc(funcNode);
+  SetLLVMFunctionAttributes(fooFunc);
   if (!funcNode->is_definition) {
     return;
   }
