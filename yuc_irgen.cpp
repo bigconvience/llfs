@@ -28,9 +28,20 @@ static llvm::Constant *buffer2Constants(llvm::Type *Ty, Type *ctype, Relocation 
 static llvm::Constant *yuc2Constants(llvm::Type *Ty, Obj *gvarNode);
 static llvm::GlobalVariable *createGlobalVar(Obj *yucNode);
 static llvm::Type *yuc2LLVMType(Type *ctype);
+static llvm::Type *getTypeWithArg(Type *ctype);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
+
+static llvm::Type *getTypeWithArg(Type *ty) {
+  llvm::Type *localType;
+  if (ty->kind == TY_BOOL) {
+    localType = Builder->getInt8Ty();
+  } else {
+    localType = yuc2LLVMType(ty);
+  }
+  return localType;
+}
 
 static llvm::Value *getScopeVar(Obj *var) {
   return scopeVars[var];
@@ -151,8 +162,11 @@ static llvm::Value *gen_addr(Node *node) {
       if (!originValue) {
         output << " empty originValue " << std::endl;
       }
-      llvm::Type *type = yuc2LLVMType(var->ty);
+      llvm::Type *type = getTypeWithArg(var->ty);
       Addr = Builder->CreateLoad(type, originValue);
+      if (var->ty->kind == TY_BOOL) {
+        Addr = Builder->CreateTrunc(Addr, Builder->getInt1Ty());
+      }
     } else {
       llvm::Constant *globalVar = getGlobalVar(var);
       llvm::Type *type = yuc2LLVMType(var->ty);
@@ -194,6 +208,10 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
     target = Builder->CreateTrunc(Base, targetTy);
   } else if (fromKind == TY_INT && toKind == TY_CHAR) {
     target = Builder->CreateTrunc(Base, targetTy);
+  } else if (fromKind == TY_BOOL && toKind == TY_INT) {
+    target = Builder->CreateZExt(Base, targetTy);
+  } else if (fromKind == TY_INT && toKind == TY_BOOL) {
+    target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
   }
   output << std::endl;
   return target;
@@ -532,8 +550,6 @@ static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
 }
 
 static llvm::Type *yuc2LLVMType(Type *ctype) {
-  output << "yuc2LLVMType start kind: "
-      << ctypeKindString(ctype->kind) << std::endl;
   llvm::Type *type;
   switch (ctype->kind) {
     case TY_BOOL:
@@ -1027,7 +1043,7 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     if (varName == "__alloca_size__" || varName == "__va_area__") {
       continue;
     }
-    llvm::Type *localType = yuc2LLVMType(local->ty);
+    llvm::Type *localType = getTypeWithArg(local->ty);
     llvm::Value *localAddr = Builder->CreateAlloca(localType, nullptr);
     putScopeVar(local, localAddr);
     LocallAddress[local->offset] = localAddr;
@@ -1049,7 +1065,12 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     output << "arg name: " << arg->name
       << " offset " << arg->offset << std::endl;
     llvm::Value *argAddr = LocallAddress[arg->offset];
-    Builder->CreateStore(AI, argAddr);
+    TypeKind typeKind = arg->ty->kind;
+    llvm::Value *fnArg = AI;
+    if (typeKind == TY_BOOL) {
+      fnArg = Builder->CreateZExt(AI, Builder->getInt8Ty());
+    }
+    Builder->CreateStore(fnArg, argAddr);
   }
 }
 
