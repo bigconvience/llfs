@@ -1837,7 +1837,6 @@ static Node *expr(Token **rest, Token *tok) {
 }
 
 static int64_t eval(Node *node) {
-  std::cout << "eval node kind:" << node->kind << std::endl;
   return eval2(node, NULL);
 }
 
@@ -1848,7 +1847,6 @@ static int64_t eval(Node *node) {
 // number. The latter form is accepted only as an initialization
 // expression for a global variable.
 static int64_t eval2(Node *node, char ***label) {
-  std::cout << "eval2 node kind:" << node->kind << " ";
   add_type(node);
 
   if (is_flonum(node->ty))
@@ -2396,6 +2394,7 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
   }
 
   // ptr + num
+  rhs->ty->array_index = true;
   rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
   return new_binary(ND_ADD, lhs, rhs, tok);
 }

@@ -29,6 +29,7 @@ static llvm::Constant *yuc2Constants(llvm::Type *Ty, Obj *gvarNode);
 static llvm::GlobalVariable *createGlobalVar(Obj *yucNode);
 static llvm::Type *yuc2LLVMType(Type *ctype);
 static llvm::Type *getTypeWithArg(Type *ctype);
+static llvm::Constant *getOffset(long offset);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -129,7 +130,7 @@ static llvm::Constant *getPadding(int PadSize) {
 static std::string buildSeperator(int count, std::string target) {
   std::string result = "";
   for (int i = 1; i < count; i++) {
-    result.append("\t");
+    result.append("  ");
   }
   result.append(target);
   return result;
@@ -146,7 +147,7 @@ static llvm::Value *gen_addr(Node *node) {
   llvm::Value *Addr = nullptr;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
-  output << buildSeperator(cur_level, "gen_addr:" + kindStr) << std::endl;
+  output << buildSeperator(cur_level, "gen_addr start:" + kindStr) << std::endl;
   switch(node->kind) {
     case NodeKind::ND_VAR:
     Obj *var = node->var;
@@ -168,24 +169,30 @@ static llvm::Value *gen_addr(Node *node) {
         Addr = Builder->CreateTrunc(Addr, Builder->getInt1Ty());
       }
     } else {
-      llvm::Constant *globalVar = getGlobalVar(var);
       llvm::Type *type = yuc2LLVMType(var->ty);
       Addr = TheModule->getNamedGlobal(varName);
     }
     break;
   }
   --stmt_level;
+  output << buildSeperator(cur_level, "gen_addr end") << std::endl;
   return Addr;
 }
 
 static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   TypeKind fromKind = from->kind;
   TypeKind toKind = to->kind;
-  std::string fromType = ctypeKindString(fromKind);
-  std::string toType = ctypeKindString(toKind);
-  llvm::Type *targetTy = yuc2LLVMType(to);
-  output << "fromType: " << fromType << " toType: " << toType << std::endl;
 
+  std::string fromTypeStr = ctypeKindString(fromKind);
+  std::string toTypeStr = ctypeKindString(toKind);
+  output << buildSeperator(stmt_level, "  cast: ");
+  output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  
+  if (fromKind == toKind) {
+    return Base;
+  }
+
+  llvm::Type *targetTy = yuc2LLVMType(to);
   llvm::Value *target = Base;
   if (fromKind == TY_ARRAY && toKind == TY_PTR) {
     llvm::SmallVector<llvm::Constant*, 8> IndexValues;
@@ -213,7 +220,6 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   } else if (fromKind == TY_INT && toKind == TY_BOOL) {
     target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
   }
-  output << std::endl;
   return target;
 }
 
@@ -226,11 +232,49 @@ static std::vector<llvm::Value *> push_args(Node *node) {
   return ArgsV;
 }
 
+static llvm::Value *genCast(Node *node) {
+  Type *fromType = node->lhs->ty;
+  Type *toType = node->ty;
+  std::string fromTypeStr = ctypeKindString(fromType->kind);
+  std::string toTypeStr = ctypeKindString(toType->kind);
+  output << buildSeperator(stmt_level, "  ");
+  output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  llvm::Value *V = nullptr;
+  if (fromType->kind == TY_LONG && toType->kind == TY_PTR) {
+    V = gen_expr(node->lhs->lhs);
+  } else {
+    V = gen_expr(node->lhs);
+    V = cast(V, fromType, toType);
+  }
+  return V;
+}
+
+static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset) {
+  int cur_level = ++stmt_level;
+  output << buildSeperator(cur_level, "gen_get_ptr: " + ctypeKindString(node->ty->kind)) << std::endl;
+  output << buildSeperator(cur_level, "gen_get_ptr base: " + ctypeKindString(node->ty->base->kind)) << std::endl; 
+  llvm::Value *target = nullptr;
+  llvm::Type *origPtrTy = nullptr;
+  std::vector<llvm::Value *> IndexValues;
+  if (node->ty->kind == TY_ARRAY) {
+    IndexValues.push_back(getOffset(0));
+    origPtrTy = yuc2LLVMType(node->ty);
+  } else {
+    origPtrTy = yuc2LLVMType(node->ty->base);
+  }
+  IndexValues.push_back(offset);
+  target = Builder->CreateInBoundsGEP(origPtrTy, baseAddr, IndexValues);
+  stmt_level--;
+
+  return target;
+}
+
 static llvm::Value *gen_expr(Node *node) {
   int cur_level = ++stmt_level;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
-  output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr) << std::endl; 
+  std::string typeStr = ctypeKindString(node->ty->kind);
+  output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr + " type:" + typeStr) << std::endl; 
   cur_level++;
   llvm::Value *V = nullptr;
   llvm::Value *casted = nullptr;
@@ -251,14 +295,12 @@ static llvm::Value *gen_expr(Node *node) {
       output << buildSeperator(cur_level, "ND_COND:") << node->kind << std::endl;
       break;
     case ND_ASSIGN:
-      output << buildSeperator(cur_level, "ND_ASSIGN:") << node->kind << std::endl;
       gen_addr(node->lhs);
       gen_expr(node->rhs);
 
       break;
     case ND_NUM:
-      output << buildSeperator(cur_level, "ND_NUM:") << node->kind << std::endl;
-      V = llvm::ConstantInt::get(yuc2LLVMType(nodeType), node->val);;
+      V = llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), node->val);;
       break;
     case ND_MEMZERO:
       output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << std::endl;
@@ -268,19 +310,22 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_DEREF:
       V = gen_expr(node->lhs);
-      V = load(node->ty, V);
+      if (node->ty->kind != TY_ARRAY && node->lhs->ty->kind == TY_PTR) {
+        V = load(node->ty, V);
+      }
       break;
     case ND_ADDR:
       V = gen_addr(node->lhs);
       break;
     case ND_CAST:
-      V = gen_expr(node->lhs);
-      V = cast(V, node->lhs->ty, node->ty);
+      V = genCast(node);
       break;
     case ND_ADD:
       operandL = gen_expr(node->lhs);
       operandR = gen_expr(node->rhs);
-      if (node->ty->is_unsigned) {
+      if (node->ty->kind == TY_PTR || node->ty->kind == TY_ARRAY) {
+        V = gen_get_ptr(node->lhs->lhs, operandL, operandR);
+      } else if (node->ty->is_unsigned) {
         V = Builder->CreateNUWAdd(operandL, operandR);
       } else {
         V = Builder->CreateNSWAdd(operandL, operandR);
@@ -436,7 +481,6 @@ static void gen_stmt(Node *node) {
   int level = ++stmt_level;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
-  output << "stmt " << std::endl;
   output << buildSeperator(level, "gen_stmt start:") << " "<< cur_count << std::endl;
   output << buildSeperator(level, kindStr) << std::endl;
   llvm::Value *tmpV;
@@ -474,6 +518,7 @@ static llvm::ArrayType *yuc2ArrayType(Type *ctype) {
 }
 
 static llvm::Type *yuc2PointerType(Type *ctype) {
+  // output << "yuc2PointerType baseType ";
   llvm::Type *base = yuc2LLVMType(ctype->base);
   llvm::Type *type = llvm::PointerType::get(base, 0);
   return type;
@@ -550,6 +595,7 @@ static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
 }
 
 static llvm::Type *yuc2LLVMType(Type *ctype) {
+  // output << "yuc2LLVMType: " << ctypeKindString(ctype->kind)  << std::endl;
   llvm::Type *type;
   switch (ctype->kind) {
     case TY_BOOL:
@@ -887,13 +933,12 @@ void processAnnonVar(Obj *ast) {
 
 static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
 	std::string name = yucNode->name;
-	output << "createGlobalVar name:" << name;
 
 	Type *ctype = yucNode->ty;
 	if (ctype->kind == TY_FUNC) {
 		return nullptr;
 	}
-
+  output << "createGlobalVar name:" << name;
 	output << " kind:" << ctypeKindString(ctype->kind);
   if (ctype->base) {
     output << " base " << ctypeKindString(ctype->base->kind);

@@ -346,6 +346,7 @@ struct Type {
 
   // Array
   int array_len;
+  bool array_index;
 
   // Variable-length array
   Node *vla_len; // # of elements
