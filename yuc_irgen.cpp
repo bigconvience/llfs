@@ -143,7 +143,6 @@ static llvm::Value* load(Type *ty, llvm::Value *originValue) {
 
 static llvm::Value *gen_addr(Node *node) {
   int cur_level = ++stmt_level;
-  cur_level++;
   llvm::Value *Addr = nullptr;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
@@ -153,7 +152,7 @@ static llvm::Value *gen_addr(Node *node) {
     Obj *var = node->var;
     std::string typeStr = ctypeKindString(var->ty->kind);
     std::string varName = var->name;
-    output << buildSeperator(cur_level, "var type:" + typeStr)
+    output << buildSeperator(cur_level + 1, "var type:" + typeStr)
       << " " << varName << std::endl;
     if (isAnnonVar(varName)) {
       const std::string &Str = annonInitData[varName];
@@ -185,8 +184,8 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
 
   std::string fromTypeStr = ctypeKindString(fromKind);
   std::string toTypeStr = ctypeKindString(toKind);
-  output << buildSeperator(stmt_level, "  cast: ");
-  output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  // output << buildSeperator(stmt_level, "  cast: ");
+  // output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
   
   if (fromKind == toKind) {
     return Base;
@@ -269,14 +268,50 @@ static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *
   return target;
 }
 
+static llvm::Value *gen_add_2(Node *node,
+    llvm::Value *operandL, llvm::Value *operandR) {
+  llvm::Value *V = nullptr;
+  if (node->ty->kind == TY_PTR || node->ty->kind == TY_ARRAY) {
+    V = gen_get_ptr(node->lhs->lhs, operandL, operandR);
+  } else if (node->ty->is_unsigned) {
+    V = Builder->CreateNUWAdd(operandL, operandR);
+  } else {
+    V = Builder->CreateNSWAdd(operandL, operandR);
+  }
+  return V;
+}
+
+static llvm::Value *gen_add(Node *node) {
+  llvm::Value *operandL, *operandR;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  return gen_add_2(node, operandL, operandR);
+}
+
+
+static llvm::Value *gen_post_inc(Node *node) {
+  llvm::Value *operandL, *operandR;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+
+  llvm::Value *sum = gen_add_2(node, operandL, operandR);
+  llvm::Value *targetAdd = getScopeVar(node->lhs->var);
+  
+  Builder->CreateStore(sum, targetAdd);
+  return operandL;
+}
+
 static llvm::Value *gen_expr(Node *node) {
   int cur_level = ++stmt_level;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
-  std::string typeStr = ctypeKindString(node->ty->kind);
+  std::string typeStr = node->ty ? ctypeKindString(node->ty->kind) : "";
   output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr + " type:" + typeStr) << std::endl; 
-  cur_level++;
   llvm::Value *V = nullptr;
+  if (kind == ND_NULL_EXPR) {
+    return V;
+  }
+  cur_level++;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
   Type* nodeType = node->ty;
@@ -284,22 +319,21 @@ static llvm::Value *gen_expr(Node *node) {
   llvm::CmpInst::Predicate predicate;
   switch(kind) {
     case ND_NULL_EXPR:
-      output << buildSeperator(cur_level, "ND_NULL_EXPR:") << node->kind << std::endl;
       break;
     case ND_COMMA:
-      output << buildSeperator(cur_level, "ND_COMMA:") << node->kind << std::endl;
       gen_expr(node->lhs);
-      gen_expr(node->rhs);
+      V = gen_expr(node->rhs);
       break;
     case ND_COND:
       output << buildSeperator(cur_level, "ND_COND:") << node->kind << std::endl;
       break;
     case ND_ASSIGN:
-      gen_addr(node->lhs);
+      V = gen_addr(node->lhs);
       gen_expr(node->rhs);
 
       break;
     case ND_NUM:
+      output << buildSeperator(cur_level, "ND_NUM: " + std::to_string(node->val)) << std::endl; 
       V = llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), node->val);;
       break;
     case ND_MEMZERO:
@@ -320,16 +354,11 @@ static llvm::Value *gen_expr(Node *node) {
     case ND_CAST:
       V = genCast(node);
       break;
+    case ND_POST_INC:
+      V = gen_post_inc(node);
+      break;
     case ND_ADD:
-      operandL = gen_expr(node->lhs);
-      operandR = gen_expr(node->rhs);
-      if (node->ty->kind == TY_PTR || node->ty->kind == TY_ARRAY) {
-        V = gen_get_ptr(node->lhs->lhs, operandL, operandR);
-      } else if (node->ty->is_unsigned) {
-        V = Builder->CreateNUWAdd(operandL, operandR);
-      } else {
-        V = Builder->CreateNSWAdd(operandL, operandR);
-      }
+      V = gen_add(node);
       break;
     case ND_SUB:
       operandL = gen_expr(node->lhs);
@@ -496,9 +525,7 @@ static void gen_stmt(Node *node) {
     case ND_EXPR_STMT:
       gen_expr(node->lhs);
       break;
-
     case ND_RETURN:
-      output << buildSeperator(level+1, kindStr) << std::endl; 
       gen_return(node);
       break;
     default:

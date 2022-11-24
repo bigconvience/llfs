@@ -1420,7 +1420,6 @@ static void write_buf(char *buf, uint64_t val, int sz) {
 
 static Relocation *
 write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int offset) {
-  std::cout << "\nwrite_gvar_data " << ty->kind <<std::endl;
   if (ty->kind == TY_ARRAY) {
     int sz = ty->base->size;
     for (int i = 0; i < ty->array_len; i++)
@@ -1854,13 +1853,10 @@ static int64_t eval2(Node *node, char ***label) {
 
   switch (node->kind) {
   case ND_ADD:
-    std::cout << "ND_ADD" << std::endl;
     return eval2(node->lhs, label) + eval(node->rhs);
   case ND_SUB:
-    std::cout << "ND_SUB" << std::endl;
     return eval2(node->lhs, label) - eval(node->rhs);
   case ND_MUL:
-    std::cout << "ND_MUL" << std::endl;
     return eval(node->lhs) * eval(node->rhs);
   case ND_DIV:
     if (node->ty->is_unsigned)
@@ -1909,7 +1905,6 @@ static int64_t eval2(Node *node, char ***label) {
   case ND_LOGOR:
     return eval(node->lhs) || eval(node->rhs);
   case ND_CAST: {
-    std::cout << "ND_CAST" << std::endl;
     int64_t val = eval2(node->lhs, label);
     if (is_integer(node->ty)) {
       switch (node->ty->size) {
@@ -1921,7 +1916,6 @@ static int64_t eval2(Node *node, char ***label) {
     return val;
   }
   case ND_ADDR:
-    std::cout << "ND_ADDR" << std::endl;
     return eval_rval(node->lhs, label);
   case ND_LABEL_VAL:
     *label = &node->unique_label;
@@ -2815,9 +2809,18 @@ static Node *struct_ref(Node *node, Token *tok) {
 // Convert A++ to `(typeof A)((A += 1) - 1)`
 static Node *new_inc_dec(Node *node, Token *tok, int addend) {
   add_type(node);
-  return new_cast(new_add(to_assign(new_add(node, new_num(addend, tok), tok)),
-                          new_num(-addend, tok), tok),
-                  node->ty);
+  Node *inc_dec;
+  if (addend > 0) {
+    inc_dec = new_unary(ND_POST_INC, node, tok);
+  } else {
+    inc_dec = new_unary(ND_POST_DEC, node, tok);
+  }
+  inc_dec->rhs = new_num(addend, tok);
+  add_type(inc_dec);
+  return inc_dec;
+  // return new_cast(new_add(to_assign(new_add(node, new_num(addend, tok), tok)),
+  //                         new_num(-addend, tok), tok),
+  //                 node->ty);
 }
 
 // postfix = "(" type-name ")" "{" initializer-list "}"

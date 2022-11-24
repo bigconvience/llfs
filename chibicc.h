@@ -227,6 +227,10 @@ typedef enum {
   ND_ASM,       // "asm"
   ND_CAS,       // Atomic compare-and-swap
   ND_EXCH,      // Atomic exchange
+  ND_POST_INC, // post++
+  ND_POST_DEC, // post--
+  ND_PREFIX_INC, // ++prefix
+  ND_PREFIX_DEC, // --prefix
 } NodeKind;
 
 // AST node type
@@ -629,7 +633,10 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_CAS";
     case ND_EXCH:
       return "ND_EXCH";
-    
+    case ND_POST_INC:
+      return "ND_POST_INC";
+    case ND_POST_DEC:
+      return "ND_POST_DEC";
     default:
       return "unkonw";
   }
