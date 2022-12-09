@@ -1,4 +1,5 @@
-int counter() {
+int counter1() {
   int i;
-  return i++;
+  i = i + 2;
+  return ++i;
 }

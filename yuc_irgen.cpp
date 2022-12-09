@@ -34,6 +34,8 @@ static llvm::Constant *getOffset(long offset);
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
 
+static void genStore(llvm::Value *V, llvm::Value *Addr);
+
 static llvm::Type *getTypeWithArg(Type *ty) {
   llvm::Type *localType;
   if (ty->kind == TY_BOOL) {
@@ -281,11 +283,34 @@ static llvm::Value *gen_add_2(Node *node,
   return V;
 }
 
+static void genStore(llvm::Value *V, llvm::Value *Addr) {
+  Builder->CreateStore(V, Addr);
+}
+
 static llvm::Value *gen_add(Node *node) {
   llvm::Value *operandL, *operandR;
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
   return gen_add_2(node, operandL, operandR);
+}
+
+static llvm::Value *gen_LValue(Node *node) {
+  int cur_level = ++stmt_level;
+  llvm::Value *LValue;
+  NodeKind kind = node->kind;
+  std::string kindStr = node_kind_info(kind);
+  output << buildSeperator(cur_level, "gen_LValue start:" + kindStr) << std::endl;
+  switch(node->kind) {
+    case NodeKind::ND_VAR:
+      Obj *var = node->var;
+      if (var->is_local) {
+        LValue = getScopeVar(var);
+      }
+      break;
+  }
+  --stmt_level;
+  output << buildSeperator(cur_level, "gen_LValue end") << std::endl;
+  return LValue;
 }
 
 
@@ -296,8 +321,17 @@ static llvm::Value *gen_post_inc(Node *node) {
 
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
   llvm::Value *targetAdd = getScopeVar(node->lhs->var);
-  
-  Builder->CreateStore(sum, targetAdd);
+
+  genStore(sum, targetAdd);
+  return operandL;
+}
+
+
+static llvm::Value *gen_assign(Node *node) {
+  llvm::Value *operandL, *operandR;
+  operandL = gen_LValue(node->lhs);
+  operandR = gen_expr(node->rhs);
+  genStore(operandR, operandL);
   return operandL;
 }
 
@@ -328,9 +362,7 @@ static llvm::Value *gen_expr(Node *node) {
       output << buildSeperator(cur_level, "ND_COND:") << node->kind << std::endl;
       break;
     case ND_ASSIGN:
-      V = gen_addr(node->lhs);
-      gen_expr(node->rhs);
-
+      V = gen_assign(node);
       break;
     case ND_NUM:
       output << buildSeperator(cur_level, "ND_NUM: " + std::to_string(node->val)) << std::endl; 
