@@ -318,5 +318,9 @@ void add_type(Node *node) {
   case ND_POST_DEC:
     node->ty = node->lhs->ty;
     return;
+  case ND_PREFIX_INC:
+  case ND_PREFIX_DEC:
+    node->ty = node->lhs->ty;
+    return;
   }
 }

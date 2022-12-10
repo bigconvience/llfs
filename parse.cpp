@@ -161,6 +161,8 @@ static bool is_function(Token *tok);
 static Token *function(Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(Token *tok, Type *basety, VarAttr *attr);
 
+static Node *new_prefix(Node *node, Token *tok, int addend);
+
 static int align_down(int n, int align) {
   return align_to(n - align + 1, align);
 }
@@ -2541,11 +2543,13 @@ static Node *unary(Token **rest, Token *tok) {
 
   // Read ++i as i+=1
   if (equal(tok, "++"))
-    return to_assign(new_add(unary(rest, tok->next), new_num(1, tok), tok));
+    return new_prefix(unary(rest, tok->next), tok, 1);
+    // return to_assign(new_add(unary(rest, tok->next), new_num(1, tok), tok));
 
   // Read --i as i-=1
   if (equal(tok, "--"))
-    return to_assign(new_sub(unary(rest, tok->next), new_num(1, tok), tok));
+    return new_prefix(unary(rest, tok->next), tok, -1);
+    // return to_assign(new_sub(unary(rest, tok->next), new_num(1, tok), tok));
 
   // [GNU] labels-as-values
   if (equal(tok, "&&")) {
@@ -2821,6 +2825,20 @@ static Node *new_inc_dec(Node *node, Token *tok, int addend) {
   // return new_cast(new_add(to_assign(new_add(node, new_num(addend, tok), tok)),
   //                         new_num(-addend, tok), tok),
   //                 node->ty);
+}
+
+static Node *new_prefix(Node *node, Token *tok, int addend) {
+  std::cout << "new prefix" << std::endl;
+  add_type(node);
+  Node *inc_dec;
+  if (addend > 0) {
+    inc_dec = new_unary(ND_PREFIX_INC, node, tok);
+  } else {
+    inc_dec = new_unary(ND_PREFIX_DEC, node, tok);
+  }
+  inc_dec->rhs = new_num(addend, tok);
+  // add_type(inc_dec);
+  return inc_dec;
 }
 
 // postfix = "(" type-name ")" "{" initializer-list "}"

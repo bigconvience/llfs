@@ -637,6 +637,10 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_POST_INC";
     case ND_POST_DEC:
       return "ND_POST_DEC";
+    case ND_PREFIX_INC:
+      return "ND_PREFIX_INC";
+    case ND_PREFIX_DEC:
+      return "ND_PREFIX_DEC";
     default:
       return "unkonw";
   }

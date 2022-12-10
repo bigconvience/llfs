@@ -235,8 +235,8 @@ static std::vector<llvm::Value *> push_args(Node *node) {
 
 static llvm::Value *genCast(Node *node) {
   Type *fromType = node->lhs->ty;
-  Type *toType = node->ty;
   std::string fromTypeStr = ctypeKindString(fromType->kind);
+  Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
   output << buildSeperator(stmt_level, "  ");
   output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
@@ -314,7 +314,7 @@ static llvm::Value *gen_LValue(Node *node) {
 }
 
 
-static llvm::Value *gen_post_inc(Node *node) {
+static llvm::Value *gen_postfix(Node *node, bool isInc) {
   llvm::Value *operandL, *operandR;
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
@@ -324,6 +324,18 @@ static llvm::Value *gen_post_inc(Node *node) {
 
   genStore(sum, targetAdd);
   return operandL;
+}
+
+static llvm::Value *gen_prefix(Node *node, bool isInc) {
+  llvm::Value *operandL, *operandR;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+
+  llvm::Value *sum = gen_add_2(node, operandL, operandR);
+  llvm::Value *targetAdd = getScopeVar(node->lhs->var);
+
+  genStore(sum, targetAdd);
+  return sum;
 }
 
 
@@ -339,7 +351,8 @@ static llvm::Value *gen_expr(Node *node) {
   int cur_level = ++stmt_level;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
-  std::string typeStr = node->ty ? ctypeKindString(node->ty->kind) : "";
+  Type* nodeType = node->ty;
+  std::string typeStr = nodeType ? ctypeKindString(node->ty->kind) : "";
   output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr + " type:" + typeStr) << std::endl; 
   llvm::Value *V = nullptr;
   if (kind == ND_NULL_EXPR) {
@@ -348,7 +361,6 @@ static llvm::Value *gen_expr(Node *node) {
   cur_level++;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
-  Type* nodeType = node->ty;
   TypeKind typeKind = nodeType->kind;
   llvm::CmpInst::Predicate predicate;
   switch(kind) {
@@ -387,7 +399,16 @@ static llvm::Value *gen_expr(Node *node) {
       V = genCast(node);
       break;
     case ND_POST_INC:
-      V = gen_post_inc(node);
+      V = gen_postfix(node, true);
+      break;
+    case ND_POST_DEC:
+      V = gen_postfix(node, false);
+      break;
+    case ND_PREFIX_INC:
+      V = gen_prefix(node, true);
+      break;
+    case ND_PREFIX_DEC:
+      V = gen_prefix(node, false);
       break;
     case ND_ADD:
       V = gen_add(node);
