@@ -352,9 +352,12 @@ static llvm::Value *gen_expr(Node *node) {
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
   Type* nodeType = node->ty;
-  std::string typeStr = nodeType ? ctypeKindString(node->ty->kind) : "";
+  std::string typeStr = nodeType ? ctypeKindString(nodeType->kind) : "";
   output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr + " type:" + typeStr) << std::endl; 
   llvm::Value *V = nullptr;
+  if (nodeType == nullptr) {
+    return V;
+  }
   if (kind == ND_NULL_EXPR) {
     return V;
   }

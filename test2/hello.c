@@ -1,5 +1,5 @@
 int counter1() {
   int i;
-  i = i + 2;
-  return ++i;
+  int j = 1 + 1;
+  return i++ + j++;
 }
