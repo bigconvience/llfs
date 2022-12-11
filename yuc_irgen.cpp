@@ -143,6 +143,19 @@ static llvm::Value* load(Type *ty, llvm::Value *originValue) {
   return Builder->CreateLoad(type, originValue);
 }
 
+static llvm::Value *gen_RValue(Node *node) {
+  int cur_level = ++stmt_level;
+  NodeKind kind = node->kind;
+  std::string kindStr = node_kind_info(kind);
+  output << buildSeperator(cur_level, "gen_RValue start:" + kindStr) << std::endl;
+  Obj *var = node->var;
+  std::string varName = var->name;
+  llvm::Value *Addr = TheModule->getNamedGlobal(varName);
+  --stmt_level;
+  output << buildSeperator(cur_level, "gen_RValue end") << std::endl;
+  return load(var->ty, Addr);  
+}
+
 static llvm::Value *gen_addr(Node *node) {
   int cur_level = ++stmt_level;
   llvm::Value *Addr = nullptr;
@@ -303,8 +316,13 @@ static llvm::Value *gen_LValue(Node *node) {
   switch(node->kind) {
     case NodeKind::ND_VAR:
       Obj *var = node->var;
-      if (var->is_local) {
+      char *name = var->name;
+      if (var->is_static) {
+        LValue = TheModule->getNamedGlobal(name);
+      } else if (var->is_local) {
         LValue = getScopeVar(var);
+      } else {
+        LValue = TheModule->getNamedGlobal(name);
       }
       break;
   }
@@ -320,7 +338,7 @@ static llvm::Value *gen_postfix(Node *node, bool isInc) {
   operandR = gen_expr(node->rhs);
 
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
-  llvm::Value *targetAdd = getScopeVar(node->lhs->var);
+  llvm::Value *targetAdd = gen_LValue(node->lhs);
 
   genStore(sum, targetAdd);
   return operandL;
@@ -387,7 +405,7 @@ static llvm::Value *gen_expr(Node *node) {
       output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << std::endl;
       break;
     case ND_VAR:
-      V = gen_addr(node);
+      V = gen_RValue(node);
       break;
     case ND_DEREF:
       V = gen_expr(node->lhs);
