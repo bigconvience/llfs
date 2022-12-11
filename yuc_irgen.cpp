@@ -1252,6 +1252,7 @@ void gen_ir(Obj *prog, const std::string &filename) {
 	Obj **annon = &annonP, **named = &namedP;
 	for (Obj *cur = prog; cur; cur = cur->next) {
 		std::string name = cur->name;
+    output << "gen ir: " << name << std::endl;
 		if (isAnnonVar(name)) {
 			*annon = cur;
 			annon = &cur->next;

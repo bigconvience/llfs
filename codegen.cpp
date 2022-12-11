@@ -1598,7 +1598,5 @@ void codegen(Obj *prog, FILE *out) {
   // emit_data(prog);
   // emit_text(prog);
 
-  // codegen_yuc(prog, filename);
-
   gen_ir(prog, filename);
 }

@@ -18,6 +18,7 @@
 
 #include "chibicc.h"
 #include <iostream>
+#include <cstring>
 
 static void dump_type(Type *type, int level);
 
@@ -847,6 +848,19 @@ static Node *new_alloca(Node *sz) {
   return node;
 }
 
+static char *build_static_var_name(Token *tok) {
+  char *ident = get_ident(tok);
+  if (current_fn) {
+    char *func_name = current_fn->name;
+    int totalSize = strlen(ident) + strlen(func_name) + 1;
+    char *result = (char *)malloc(totalSize + 1);
+    sprintf(result, "%s.%s", func_name, ident);
+    result[totalSize] = 0;
+    return result;
+  }
+  return ident;
+}
+
 // declaration = declspec (declarator ("=" expr)? ("," declarator ("=" expr)?)*)? ";"
 static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) {
   Node head = {};
@@ -867,6 +881,8 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
       // static local variable
       Obj *var = new_anon_gvar(ty);
       push_scope(get_ident(ty->name))->var = var;
+      
+      var->name = build_static_var_name(ty->name);
       if (equal(tok, "="))
         gvar_initializer(&tok, tok->next, var);
       continue;
