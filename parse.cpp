@@ -796,8 +796,10 @@ static Type *enum_specifier(Token **rest, Token *tok) {
     sc->enum_val = val++;
   }
 
-  if (tag)
+  if (tag) {
     push_tag_scope(tag, ty);
+    ty->tag = tag;
+  }
   return ty;
 }
 
@@ -1789,7 +1791,7 @@ static Node *stmt(Token **rest, Token *tok) {
 
 // compound-stmt = (typedef | declaration | stmt)* "}"
 static Node *compound_stmt(Token **rest, Token *tok) {
-  Node *node = new_node(ND_BLOCK, tok);
+  Node *node = new_node(ND_COMPOUND_STMT, tok);
   Node head = {};
   Node *cur = &head;
 
@@ -2700,6 +2702,7 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
   *rest = attribute_list(tok, ty);
 
   if (tag) {
+    ty->tag = tag;
     // If this is a redefinition, overwrite a previous type.
     // Otherwise, register the struct type.
     Type *ty2 = (Type *)hashmap_get2(&scope->tags, tag->loc, tag->len);

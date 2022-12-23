@@ -217,6 +217,7 @@ typedef enum {
   ND_LABEL,     // Labeled statement
   ND_LABEL_VAL, // [GNU] Labels-as-values
   ND_FUNCALL,   // Function call
+  ND_COMPOUND_STMT,// Compound stmt
   ND_EXPR_STMT, // Expression statement
   ND_STMT_EXPR, // Statement expression
   ND_VAR,       // Variable 40
@@ -371,6 +372,7 @@ struct Type {
   Member *union_field;
 
   bool is_typedef;
+  Token *tag;
 };
 
 // Struct member
@@ -613,6 +615,8 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_LABEL_VAL";
     case ND_FUNCALL:
       return "ND_FUNCALL";
+    case ND_COMPOUND_STMT:
+      return "ND_COMPOUND_STMT";
     case ND_EXPR_STMT:
       return "ND_EXPR_STMT";
     case ND_STMT_EXPR:

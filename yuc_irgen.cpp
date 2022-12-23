@@ -28,15 +28,85 @@ static llvm::Constant *buffer2Constants(llvm::Type *Ty, Type *ctype, Relocation 
 static llvm::Constant *yuc2Constants(llvm::Type *Ty, Obj *gvarNode);
 static llvm::GlobalVariable *createGlobalVar(Obj *yucNode);
 static llvm::Type *yuc2LLVMType(Type *ctype);
-static llvm::Type *getTypeWithArg(Type *ctype);
+static llvm::Type *getTypeForArg(Type *ctype);
 static llvm::Constant *getOffset(long offset);
+static llvm::Value *gen_addr(Node *node);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
+static std::map<Type *, llvm::StructType*> tagToType;
+
+static char *get_ident(Token *tok) {
+  if (tok->kind != TK_IDENT)
+    error_tok(tok, "expected an identifier");
+  return strndup(tok->loc, tok->len);
+}
+
+typedef struct BlockScope BlockScope;
+struct BlockScope {
+  BlockScope *next;
+
+  std::map<std::string, llvm::Value *> vars;
+  std::map<std::string, llvm::StructType *> tags;
+};
+
+static BlockScope *scope = new BlockScope();
+
+static void enter_scope(void) {
+  output << "enter scope" << std::endl;
+  BlockScope *sc = new BlockScope();
+  sc->next = scope;
+  scope = sc;
+}
+
+static void leave_scope(void) {
+  output << "leave scope" << std::endl;
+  scope = scope->next;
+}
+
+static llvm::Value *find_var(std::string var_name) {
+  for (BlockScope *sc = scope; sc; sc = sc->next) {
+    llvm::Value *v = sc->vars[var_name];
+    if (v) {
+      return v;
+    }
+  }
+  return nullptr;
+}
+
+static void push_var(std::string var_name, llvm::Value *v) {
+  scope->vars[var_name] = v;
+}
+
+static llvm::StructType *find_tag(Token *tag) {
+  std::string tag_name = get_ident(tag);
+  for (BlockScope *sc = scope; sc; sc = sc->next) {
+    llvm::StructType *type = sc->tags[tag_name];
+    if (type) {
+      return type;
+    }
+  }
+  return nullptr;
+}
+
+static void push_tag_scope(Token *tag, llvm::StructType *ty) {
+  std::string tag_name = get_ident(tag);
+  output << "push tag: " << tag_name.data() << std::endl;
+  scope->tags[tag_name] = ty;
+}
+
+/// Return the value offset.
+static llvm::Constant *getOffset(long offset) {
+  return llvm::ConstantInt::get(Builder->getInt64Ty(), offset);
+}
+
+static llvm::Constant *get_offset_int32(int offset) {
+  return llvm::ConstantInt::get(Builder->getInt32Ty(), offset);
+}
 
 static void genStore(llvm::Value *V, llvm::Value *Addr);
 
-static llvm::Type *getTypeWithArg(Type *ty) {
+static llvm::Type *getTypeForArg(Type *ty) {
   llvm::Type *localType;
   if (ty->kind == TY_BOOL) {
     localType = Builder->getInt8Ty();
@@ -44,14 +114,6 @@ static llvm::Type *getTypeWithArg(Type *ty) {
     localType = yuc2LLVMType(ty);
   }
   return localType;
-}
-
-static llvm::Value *getScopeVar(Obj *var) {
-  return scopeVars[var];
-}
-
-static void putScopeVar(Obj *var, llvm::Value *V) {
-  scopeVars[var] = V;
 }
 
 static llvm::Constant *getGlobalVar(Obj *var) {
@@ -149,11 +211,15 @@ static llvm::Value *gen_RValue(Node *node) {
   std::string kindStr = node_kind_info(kind);
   output << buildSeperator(cur_level, "gen_RValue start:" + kindStr) << std::endl;
   Obj *var = node->var;
-  std::string varName = var->name;
-  llvm::Value *Addr = TheModule->getNamedGlobal(varName);
+  llvm::Value *Addr = gen_addr(node);
+  llvm::Type *type = getTypeForArg(var->ty);
+  Addr = Builder->CreateLoad(type, Addr);
+  if (var->ty->kind == TY_BOOL) {
+    Addr = Builder->CreateTrunc(Addr, Builder->getInt1Ty());
+  }
   --stmt_level;
   output << buildSeperator(cur_level, "gen_RValue end") << std::endl;
-  return load(var->ty, Addr);  
+  return Addr;  
 }
 
 static llvm::Value *gen_addr(Node *node) {
@@ -162,35 +228,57 @@ static llvm::Value *gen_addr(Node *node) {
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
   output << buildSeperator(cur_level, "gen_addr start:" + kindStr) << std::endl;
-  switch(node->kind) {
-    case NodeKind::ND_VAR:
-    Obj *var = node->var;
-    std::string typeStr = ctypeKindString(var->ty->kind);
-    std::string varName = var->name;
-    output << buildSeperator(cur_level + 1, "var type:" + typeStr)
-      << " " << varName << std::endl;
-    if (isAnnonVar(varName)) {
-      const std::string &Str = annonInitData[varName];
-      Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
-    } else if (var->is_local){
-      llvm::Value *originValue = getScopeVar(var);
-      if (!originValue) {
-        output << " empty originValue " << std::endl;
+  switch(kind) {
+    case NodeKind::ND_VAR: {
+        Obj *var = node->var;
+        std::string typeStr = ctypeKindString(var->ty->kind);
+        std::string varName = var->name;
+        output << buildSeperator(cur_level + 1, "var type:" + typeStr)
+          << " " << var->ty->is_typedef
+          << " " << varName << std::endl;
+        if (isAnnonVar(varName)) {
+          const std::string &Str = annonInitData[varName];
+          Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
+        } else if (var->is_local){
+          Addr = find_var(varName);
+          if (!Addr) {
+            output << " empty originValue " << std::endl;
+          }
+        } else {
+          llvm::Type *type = yuc2LLVMType(var->ty);
+          Addr = TheModule->getNamedGlobal(varName);
+        }
       }
-      llvm::Type *type = getTypeWithArg(var->ty);
-      Addr = Builder->CreateLoad(type, originValue);
-      if (var->ty->kind == TY_BOOL) {
-        Addr = Builder->CreateTrunc(Addr, Builder->getInt1Ty());
-      }
-    } else {
-      llvm::Type *type = yuc2LLVMType(var->ty);
-      Addr = TheModule->getNamedGlobal(varName);
-    }
-    break;
+      break;
+    case ND_MEMBER:
+      Addr = gen_addr(node->lhs);
+      break;
   }
   --stmt_level;
   output << buildSeperator(cur_level, "gen_addr end") << std::endl;
   return Addr;
+}
+
+static llvm::Value *gen_memeber_ptr(Node *node, llvm::Value *ptrval) {
+  llvm::Type *origPtrTy = yuc2LLVMType(node->lhs->ty);
+  
+  Member *member = node->member;
+  std::vector<llvm::Value *> IndexValues;
+  IndexValues.push_back(get_offset_int32(0));
+  IndexValues.push_back(get_offset_int32(member->idx));
+
+  llvm::Value *target = Builder->CreateInBoundsGEP(origPtrTy, ptrval, IndexValues);
+  return target;
+}
+
+static llvm::Value *gen_member(Node *node) {
+  int cur_level = ++stmt_level;
+  output << buildSeperator(cur_level, "gen_member start") << std::endl;
+  llvm::Value *base = gen_addr(node->lhs);
+  llvm::Value *ptr = gen_memeber_ptr(node, base);
+  --stmt_level;
+  output << buildSeperator(cur_level, "gen_member end") << std::endl;
+  return ptr;
 }
 
 static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
@@ -314,16 +402,20 @@ static llvm::Value *gen_LValue(Node *node) {
   std::string kindStr = node_kind_info(kind);
   output << buildSeperator(cur_level, "gen_LValue start:" + kindStr) << std::endl;
   switch(node->kind) {
-    case NodeKind::ND_VAR:
-      Obj *var = node->var;
-      char *name = var->name;
-      if (var->is_static) {
-        LValue = TheModule->getNamedGlobal(name);
-      } else if (var->is_local) {
-        LValue = getScopeVar(var);
-      } else {
-        LValue = TheModule->getNamedGlobal(name);
+    case ND_VAR: {
+        Obj *var = node->var;
+        char *name = var->name;
+        if (var->is_static) {
+          LValue = TheModule->getNamedGlobal(name);
+        } else if (var->is_local) {
+          LValue = find_var(name);
+        } else {
+          LValue = TheModule->getNamedGlobal(name);
+        }
       }
+      break;
+    case ND_MEMBER:
+      LValue = gen_member(node);
       break;
   }
   --stmt_level;
@@ -350,7 +442,7 @@ static llvm::Value *gen_prefix(Node *node, bool isInc) {
   operandR = gen_expr(node->rhs);
 
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
-  llvm::Value *targetAdd = getScopeVar(node->lhs->var);
+  llvm::Value *targetAdd = find_var(node->lhs->var->name);
 
   genStore(sum, targetAdd);
   return sum;
@@ -579,6 +671,14 @@ static void gen_return(Node *node) {
   }
 }
 
+static void gen_compound_stmt(Node *node) {
+  enter_scope();
+  for (Node *n = node->body; n; n = n->next) {
+    gen_stmt(n);
+  }
+  leave_scope();
+}
+
 static void gen_stmt(Node *node) {
   int cur_count = ++stmt_count;
   int level = ++stmt_level;
@@ -595,6 +695,9 @@ static void gen_stmt(Node *node) {
       for (Node *n = node->body; n; n = n->next) {
         gen_stmt(n);
       }
+      break;
+    case ND_COMPOUND_STMT:
+      gen_compound_stmt(node);
       break;
     case ND_EXPR_STMT:
       gen_expr(node->lhs);
@@ -634,7 +737,6 @@ static int getMemberCount(Type *ctype) {
 }
 
 static llvm::StructType *yuc2StructType(Type *ctype) {
-  //output << "yuc2StructType" << std::endl;
   llvm::SmallVector<llvm::Type *, 16> Types;
 
   int memberCount = getMemberCount(ctype);
@@ -642,7 +744,8 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   Member *member = ctype->union_field;
   llvm::StructType *type;
   int DesiredSize = ctype->size;
-  output << "yuc2StructType DesiredSize:" << DesiredSize << std::endl;
+  Token *tag = ctype->tag;
+  output << "yuc2StructType DesiredSize:" << DesiredSize << " align:" << ctype->align << std::endl;
   // union
   if (member) {
     int Size = member->ty->size;
@@ -668,10 +771,13 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   for (Member *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
-  if (ctype->is_typedef) {
+  if (ctype->is_typedef && !tag) {
     type = llvm::StructType::get(*TheContext, Types, false);
   } else {
     type = llvm::StructType::create(*TheContext, Types, "", false);
+  }
+  if (tag) {
+    push_tag_scope(ctype->tag, type);
   }
   return type;
 }
@@ -682,16 +788,30 @@ void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix
   std::string kindName = ctypeKindString(ctype->kind);
   OS << kindName << ".";
 
-  OS << "anon";
   if (!suffix.empty()) {
     OS << suffix;
+  } else {
+    OS << "anon";
   }
   Ty->setName(OS.str());
+  output << "addRecordTypeName: " << Ty->getName().data() << std::endl;
 }
 
 static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
+  Token *tag = ctype->tag;
+  llvm::StructType *ty = nullptr;
+  if (tag) {
+    ty = find_tag(tag);
+    if (ty) {
+      return ty;
+    }
+  }
   llvm::StructType *DesiredType = yuc2StructType(ctype);
-  addRecordTypeName(ctype, DesiredType, "");
+  llvm::StringRef suffix = "";
+  if (ctype->is_typedef) {
+    suffix = get_ident(ctype->tag);
+  }
+  addRecordTypeName(ctype, DesiredType, suffix);
   return DesiredType;
 }
 
@@ -871,11 +991,6 @@ llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, Type *ctype, char 
   return llvm::ConstantStruct::get(STy, Elements);
 }
 
-/// Return the value offset.
-static llvm::Constant *getOffset(long offset) {
-  return llvm::ConstantInt::get(Builder->getInt64Ty(), offset);
-}
-
 /// Apply the value offset to the given constant.
 static llvm::Constant *applyOffset(llvm::Constant *C, long offset) {
   if (!offset)
@@ -1034,12 +1149,12 @@ void processAnnonVar(Obj *ast) {
 
 static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
 	std::string name = yucNode->name;
+  output << "createGlobalVar name:" << name << std::endl;
 
 	Type *ctype = yucNode->ty;
 	if (ctype->kind == TY_FUNC) {
 		return nullptr;
 	}
-  output << "createGlobalVar name:" << name;
 	output << " kind:" << ctypeKindString(ctype->kind);
   if (ctype->base) {
     output << " base " << ctypeKindString(ctype->base->kind);
@@ -1071,6 +1186,12 @@ static void emit_data(Obj *ast) {
   createGlobalVar(ast);
 }
 
+static llvm::Type *gen_return_type(Type *return_ty) {
+  output << "gen_return_type " << std::endl;
+  llvm::Type *retTy = yuc2LLVMType(return_ty);
+  return retTy;
+}
+
 static llvm::FunctionType * buildFunctionType(Obj *funcNode) {
   std::vector<llvm::Type *> types;
   Type *funcType = funcNode->ty;
@@ -1078,8 +1199,7 @@ static llvm::FunctionType * buildFunctionType(Obj *funcNode) {
     llvm::Type *type = yuc2LLVMType(paramType);
     types.push_back(type);
   }
-
-  llvm::Type *RetTy = yuc2LLVMType(funcType->return_ty);
+  llvm::Type *RetTy = gen_return_type(funcType->return_ty);
   bool isVarArg = funcType->is_variadic;
   if (types.empty()) {
     isVarArg = false;
@@ -1189,9 +1309,11 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     if (varName == "__alloca_size__" || varName == "__va_area__") {
       continue;
     }
-    llvm::Type *localType = getTypeWithArg(local->ty);
-    llvm::Value *localAddr = Builder->CreateAlloca(localType, nullptr);
-    putScopeVar(local, localAddr);
+    Type *ty = local->ty;
+    llvm::Type *localType = getTypeForArg(ty);
+    llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
+    localAddr->setAlignment(llvm::Align(ty->align));
+    push_var(varName, localAddr);
     LocallAddress[local->offset] = localAddr;
   }
 
@@ -1251,10 +1373,12 @@ static void buildFunction(Obj *funcNode) {
   if (!funcNode->is_definition) {
     return;
   }
- StartFunction(fooFunc, funcNode);
- buildFunctionBody(fooFunc, funcNode);
- FinishFunction(fooFunc, funcNode);
- llvm::verifyFunction(*fooFunc);
+  enter_scope();
+  StartFunction(fooFunc, funcNode);
+  buildFunctionBody(fooFunc, funcNode);
+  FinishFunction(fooFunc, funcNode);
+  leave_scope();
+  llvm::verifyFunction(*fooFunc);
 }
 
 static void emit_text(Obj *fn) {
@@ -1288,6 +1412,5 @@ void gen_ir(Obj *prog, const std::string &filename) {
 	emit_data(namedP);
   emit_text(namedP);
 	TheModule->dump();
-	output << "yuc end" << std::endl;
 }
 
