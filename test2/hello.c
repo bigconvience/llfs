@@ -1,4 +1,4 @@
-typedef struct T1 {char a; int b; char c[1]; } T;
+typedef struct T1 {char a;  int b; char c[1]; } T;
 
 T getSum() {
     T t1;

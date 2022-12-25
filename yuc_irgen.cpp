@@ -281,6 +281,41 @@ static llvm::Value *gen_member(Node *node) {
   return ptr;
 }
 
+static llvm::Type *struct_to_primitive(int size) {
+  int target_size = size * 8;
+  return llvm::Type::getIntNTy(CGM().getLLVMContext(), target_size);
+}
+
+static int get_return_size(Type *struct_ty) {
+  output << "struct size:" << struct_ty->size << " align:" << struct_ty->align << std::endl;
+  int return_size = struct_ty->size;
+  for (Member *member = struct_ty->members; member; member = member->next) {
+    output << "member size:" << member->ty->size << " align:" << member->align << " offset: " << member->offset << std::endl;
+    if (member->next == nullptr) {
+      if (member->offset == 8 && member->ty->size == 1) {
+        return_size = 9;
+        break;
+      }
+    }
+  }
+  return return_size;
+}
+
+static llvm::Type *struct_to_return(Type *struct_ty) {
+  int size = get_return_size(struct_ty);
+  if (size <= 8) {
+    return struct_to_primitive(size);
+  }
+  int left = size - 8;
+  if (left <= 8) {
+    llvm::SmallVector<llvm::Type*, 2> Types;
+    Types.push_back(struct_to_primitive(8));
+    Types.push_back(struct_to_primitive(left));
+    return llvm::StructType::get(CGM().getLLVMContext(), Types);
+  }
+  return llvm::Type::getVoidTy(CGM().getLLVMContext());
+}
+
 static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   TypeKind fromKind = from->kind;
   TypeKind toKind = to->kind;
@@ -1188,6 +1223,10 @@ static void emit_data(Obj *ast) {
 
 static llvm::Type *gen_return_type(Type *return_ty) {
   output << "gen_return_type " << std::endl;
+  if (return_ty->kind == TY_STRUCT) {
+    output << "gen_return_type size: " << return_ty->size << std::endl;
+    return struct_to_return(return_ty);
+  }
   llvm::Type *retTy = yuc2LLVMType(return_ty);
   return retTy;
 }
