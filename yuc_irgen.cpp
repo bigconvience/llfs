@@ -888,6 +888,9 @@ static llvm::Type *yuc2LLVMType(Type *ctype) {
     case TY_STRUCT:
       type = ConvertRecordDeclType(ctype);
       break;
+    case TY_VOID:
+      type = Builder->getVoidTy();
+      break;
     default:
       type = Builder->getInt32Ty();
       break;
@@ -1233,7 +1236,6 @@ static void emit_data(Obj *ast) {
 static llvm::Type *gen_return_type(Type *return_ty) {
   output << "gen_return_type " << std::endl;
   if (return_ty->kind == TY_STRUCT) {
-    output << "gen_return_type size: " << return_ty->size << std::endl;
     return struct_to_return(return_ty);
   }
   llvm::Type *retTy = yuc2LLVMType(return_ty);
