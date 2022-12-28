@@ -1,8 +1,11 @@
-typedef struct T1 {char a;  int b; char c[1]; } T;
+int printf(char *fmt, ...);
+void exit(int n);
 
-T getSum() {
-    T t1;
-    t1.a = 1;
-    t1.b = 2;
-    return t1;
+void assert(int expected, int actual, char *code) {
+  if (expected == actual) {
+    printf("%s => %d\n", code, actual);
+  } else {
+    printf("%s => %d expected but got %d\n", code, expected, actual);
+    exit(1);
+  }
 }

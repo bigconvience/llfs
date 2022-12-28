@@ -31,6 +31,7 @@ static llvm::Type *yuc2LLVMType(Type *ctype);
 static llvm::Type *getTypeForArg(Type *ctype);
 static llvm::Constant *getOffset(long offset);
 static llvm::Value *gen_addr(Node *node);
+static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -369,16 +370,25 @@ static std::vector<llvm::Value *> push_args(Node *node) {
   return ArgsV;
 }
 
-static llvm::Value *genCast(Node *node) {
+static llvm::Value *CreateConstArrayGEP(Node *node, llvm::Value *baseAddr, uint64_t Index) {
+  llvm::Constant *idx = llvm::ConstantInt::get(Builder->getInt64Ty(), Index);
+
+  return gen_get_ptr(node, baseAddr, idx);
+}
+
+static llvm::Value *gen_cast(Node *node) {
   Type *fromType = node->lhs->ty;
   std::string fromTypeStr = ctypeKindString(fromType->kind);
   Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
-  output << buildSeperator(stmt_level, "  ");
+  output << buildSeperator(stmt_level, "gen_cast");
   output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
   llvm::Value *V = nullptr;
   if (fromType->kind == TY_LONG && toType->kind == TY_PTR) {
     V = gen_expr(node->lhs->lhs);
+  } else if (fromType->kind == TY_ARRAY && toType->kind == TY_PTR) {
+    llvm::Value *baseAddr = gen_addr(node->lhs);
+    V = CreateConstArrayGEP(node->lhs, baseAddr, 0);
   } else {
     V = gen_expr(node->lhs);
     V = cast(V, fromType, toType);
@@ -544,7 +554,7 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_addr(node->lhs);
       break;
     case ND_CAST:
-      V = genCast(node);
+      V = gen_cast(node);
       break;
     case ND_POST_INC:
       V = gen_postfix(node, true);
@@ -591,7 +601,6 @@ static llvm::Value *gen_expr(Node *node) {
     case ND_FUNCALL: {
       std::vector<llvm::Value *> ArgsV = push_args(node);
       std::string Callee = node->lhs->var->name;
-      output << buildSeperator(cur_level, Callee) << std::endl;
       llvm::Function *CalleeF = getFunction(Callee);
       V = Builder->CreateCall(CalleeF, ArgsV, "");
       break;
@@ -1378,6 +1387,12 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
       fnArg = Builder->CreateZExt(AI, Builder->getInt8Ty());
     }
     Builder->CreateStore(fnArg, argAddr);
+  }
+
+  if (funcNode->ty->return_ty->kind == TY_STRUCT) {
+    llvm::Type *returnType = Func->getReturnType();
+    llvm::Value *ret_alloca = Builder->CreateAlloca(returnType, nullptr);
+    push_var(".ret_alloca", ret_alloca);
   }
 }
 

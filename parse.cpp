@@ -1955,7 +1955,6 @@ static int64_t eval2(Node *node, char ***label) {
     std::cout << "ND_VAR label:" << **label << std::endl;
     return 0;
   case ND_NUM:
-    std::cout << "ND_NUM: " << node->val << std::endl;
     return node->val;
   }
 
