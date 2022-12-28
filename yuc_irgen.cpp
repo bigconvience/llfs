@@ -43,6 +43,8 @@ static char *get_ident(Token *tok) {
   return strndup(tok->loc, tok->len);
 }
 
+using llvm::StringRef;
+
 typedef struct BlockScope BlockScope;
 struct BlockScope {
   BlockScope *next;
@@ -502,6 +504,30 @@ static llvm::Value *gen_assign(Node *node) {
   return operandL;
 }
 
+static bool isNoReturn(std::string name) {
+  bool BuildSinks
+    = llvm::StringSwitch<bool>(StringRef(name))
+      .Case("exit", true)
+      .Case("panic", true)
+      .Case("error", true)
+      .Case("Assert", true)
+      .Default(false);
+  return BuildSinks;
+}
+
+static llvm::Value *emit_call(Node *node) {
+  std::vector<llvm::Value *> ArgsV = push_args(node);
+  std::string Callee = node->lhs->var->name;
+  llvm::Function *CalleeF = getFunction(Callee);
+  llvm::Value *V = Builder->CreateCall(CalleeF, ArgsV, "");
+
+  if (isNoReturn(Callee)) {
+    Builder->CreateUnreachable();
+    Builder->ClearInsertionPoint();
+  }
+  return V;
+}
+
 static llvm::Value *gen_expr(Node *node) {
   int cur_level = ++stmt_level;
   NodeKind kind = node->kind;
@@ -598,13 +624,9 @@ static llvm::Value *gen_expr(Node *node) {
         V = Builder->CreateSDiv(operandL, operandR);
       }
       break;
-    case ND_FUNCALL: {
-      std::vector<llvm::Value *> ArgsV = push_args(node);
-      std::string Callee = node->lhs->var->name;
-      llvm::Function *CalleeF = getFunction(Callee);
-      V = Builder->CreateCall(CalleeF, ArgsV, "");
+    case ND_FUNCALL:
+      V = emit_call(node);
       break;
-    }
     case ND_EQ:
     case ND_NE:
     case ND_LT:

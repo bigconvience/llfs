@@ -1,4 +1,4 @@
-int printf(char *fmt, ...);
+int printf(const char *fmt, ...);
 void exit(int n);
 
 void assert(int expected, int actual, char *code) {
