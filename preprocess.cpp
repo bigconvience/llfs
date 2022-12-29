@@ -862,7 +862,6 @@ static Token *preprocess2(Token *tok) {
     if (equal(tok, "include")) {
       bool is_dquote;
       char *filename = read_include_filename(&tok, tok->next, &is_dquote);
-
       if (filename[0] != '/' && is_dquote) {
         char *path = format("%s/%s", dirname(strdup(start->file->name)), filename);
         if (file_exists(path)) {

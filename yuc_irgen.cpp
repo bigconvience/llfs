@@ -518,6 +518,7 @@ static bool isNoReturn(std::string name) {
 static llvm::Value *emit_call(Node *node) {
   std::vector<llvm::Value *> ArgsV = push_args(node);
   std::string Callee = node->lhs->var->name;
+  output <<"emit_call: " << Callee << std::endl;
   llvm::Function *CalleeF = getFunction(Callee);
   llvm::Value *V = Builder->CreateCall(CalleeF, ArgsV, "");
 
@@ -1218,19 +1219,13 @@ void processAnnonVar(Obj *ast) {
 
 static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
 	std::string name = yucNode->name;
-  output << "createGlobalVar name:" << name << std::endl;
 
 	Type *ctype = yucNode->ty;
 	if (ctype->kind == TY_FUNC) {
 		return nullptr;
 	}
-	output << " kind:" << ctypeKindString(ctype->kind);
-  if (ctype->base) {
-    output << " base " << ctypeKindString(ctype->base->kind);
-  }
-  if (ctype->origin) {
-    output << " origin " << ctypeKindString(ctype->origin->kind);
-  }
+
+  output << "createGlobalVar name:" << name << std::endl;
   output << std::endl;
   llvm::Type *DesiredType = yuc2LLVMType(ctype);
   TheModule->getOrInsertGlobal(name, DesiredType);
@@ -1307,13 +1302,19 @@ static void SetLLVMFunctionAttributes(llvm::Function *F) {
 }
 
 static llvm::Function *createFunc(Obj *funcNode) {
-  llvm::FunctionType *funcType = buildFunctionType(funcNode);
   std::string funcName = funcNode->name;
+  output << "createFunc: " << funcName << std::endl;
+  llvm::Value *foo = find_var(funcName);
+  if (foo) {
+    return static_cast<llvm::Function *>(foo);
+  }
+  llvm::FunctionType *funcType = buildFunctionType(funcNode);
   llvm::GlobalValue::LinkageTypes linkageType = yuc2LinkageType(funcNode);
   llvm::Function *fooFunc = llvm::Function::Create(funcType, linkageType, funcName, TheModule.get());
   if(!funcNode->is_static) {
     fooFunc->setDSOLocal(true);
   }
+  push_var(funcName, fooFunc);
   return fooFunc;
 }
 
@@ -1442,15 +1443,19 @@ static void buildFunctionBody(llvm::Function *Func, Obj *funcNode) {
   gen_stmt(funcNode->body);
 }
 
-static void buildFunction(Obj *funcNode) {
-  if (!funcNode || funcNode->ty->kind != TY_FUNC) {
-    return;
-  }
+static llvm::Function *declare_func(Obj *funcNode) {
   llvm::Function *fooFunc = createFunc(funcNode);
-  SetLLVMFunctionAttributes(fooFunc);
+  return fooFunc;
+}
+
+static void define_func(Obj *funcNode) {
+  llvm::Function *fooFunc = declare_func(funcNode);
+  // SetLLVMFunctionAttributes(fooFunc);
   if (!funcNode->is_definition) {
+    output << "buildFunction: declaration" << std::endl;
     return;
   }
+  output << "buildFunction: definition" << std::endl;
   enter_scope();
   StartFunction(fooFunc, funcNode);
   buildFunctionBody(fooFunc, funcNode);
@@ -1459,12 +1464,25 @@ static void buildFunction(Obj *funcNode) {
   llvm::verifyFunction(*fooFunc);
 }
 
-static void emit_text(Obj *fn) {
-  if (!fn) {
-    return;
+static void emit_function(Obj *fn) {
+  Obj *prev = nullptr;
+  Obj *cur = fn;
+  while(cur) {
+    if (cur->ty->kind != TY_FUNC) {
+      cur = cur->next;
+    } else if (!cur->is_definition) {
+      declare_func(cur);
+      cur = cur->next;
+    } else {
+      Obj *tmp = cur->next;
+      cur->next = prev;
+      prev = cur;
+      cur = tmp;
+    }
   }
-  emit_text(fn->next);
-  buildFunction(fn);
+  for (Obj *cur = prev; cur; cur = cur->next) {
+    define_func(cur);
+  }
 }
 
 void gen_ir(Obj *prog, const std::string &filename) {
@@ -1472,7 +1490,7 @@ void gen_ir(Obj *prog, const std::string &filename) {
 	Obj **annon = &annonP, **named = &namedP;
 	for (Obj *cur = prog; cur; cur = cur->next) {
 		std::string name = cur->name;
-    output << "gen ir: " << name << std::endl;
+    // output << "gen ir: " << name << std::endl;
 		if (isAnnonVar(name)) {
 			*annon = cur;
 			annon = &cur->next;
@@ -1488,7 +1506,7 @@ void gen_ir(Obj *prog, const std::string &filename) {
 	InitializeModule(filename);
 	processAnnonVar(annonP);
 	emit_data(namedP);
-  emit_text(namedP);
+  emit_function(namedP);
 	TheModule->dump();
 }
 
