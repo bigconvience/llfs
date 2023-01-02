@@ -1,9 +1,4 @@
-// #include "test.h"
-
-
-void assert(int expected, int actual, char *code);
-int printf(char *fmt, ...);
-void exit(int n);
+#include "test.h"
 
 int _Alignas(512) g1;
 int _Alignas(512) g2;
@@ -12,11 +7,9 @@ int g4;
 long g5;
 char g6;
 
-void assert(int expected, int actual, char *code) {
-  if (expected == actual) {
-    printf("%s => %d\n", code, actual);
-  } else {
-    printf("%s => %d expected but got %d\n", code, expected, actual);
-    exit(1);
-  }
+int main() {
+  ASSERT(-32, ({ _Alignas(32) char x, y; &x-&y; }));
+  ASSERT(32, ({ _Alignas(32) int *x, *y; ((char *)&x)-((char *)&y); }));
+  printf("OK\n");
+  return 0;
 }

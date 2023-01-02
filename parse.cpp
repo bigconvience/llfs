@@ -337,6 +337,11 @@ static char *new_unique_name(void) {
   return format(".L..%d", id++);
 }
 
+static char *new_stmt_expr_name(void) {
+  static int id = 0;
+  return format(".stmt..%d", id++);
+}
+
 static Obj *new_anon_gvar(Type *ty) {
   return new_gvar(new_unique_name(), ty);
 }
@@ -2446,7 +2451,7 @@ static Node *new_sub(Node *lhs, Node *rhs, Token *tok) {
   if (lhs->ty->base && rhs->ty->base) {
     Node *node = new_binary(ND_SUB, lhs, rhs, tok);
     node->ty = ty_long;
-    return new_binary(ND_DIV, node, new_num(lhs->ty->base->size, tok), tok);
+    return node;
   }
 
   error_tok(tok, "invalid operands");
@@ -3033,6 +3038,21 @@ static Node *generic_selection(Token **rest, Token *tok) {
   return ret;
 }
 
+static void get_last_stmt(Node *node) {
+  if (node == nullptr) {
+    return;
+  }
+  Node *cur = node->body;
+  while(cur->next) {
+    cur = cur->next;
+  }
+  node->last_expr = nullptr;
+  if (cur->kind == ND_EXPR_STMT) {
+    node->last_expr = cur;
+    node->last_var = new_lvar(new_stmt_expr_name(), cur->lhs->ty);
+  }
+}
+
 // primary = "(" "{" stmt+ "}" ")"
 //         | "(" expr ")"
 //         | "sizeof" "(" type-name ")"
@@ -3052,6 +3072,7 @@ static Node *primary(Token **rest, Token *tok) {
     // This is a GNU statement expresssion.
     Node *node = new_node(ND_STMT_EXPR, tok);
     node->body = compound_stmt(&tok, tok->next->next)->body;
+    get_last_stmt(node);
     *rest = skip(tok, ")");
     return node;
   }

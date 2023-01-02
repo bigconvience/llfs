@@ -32,6 +32,7 @@ static llvm::Type *getTypeForArg(Type *ctype);
 static llvm::Constant *getOffset(long offset);
 static llvm::Value *gen_addr(Node *node);
 static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset);
+static llvm::Value *gen_member(Node *node);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -232,7 +233,7 @@ static llvm::Value *gen_addr(Node *node) {
   std::string kindStr = node_kind_info(kind);
   output << buildSeperator(cur_level, "gen_addr start:" + kindStr) << std::endl;
   switch(kind) {
-    case NodeKind::ND_VAR: {
+    case ND_VAR: {
         Obj *var = node->var;
         std::string typeStr = ctypeKindString(var->ty->kind);
         std::string varName = var->name;
@@ -322,13 +323,23 @@ static llvm::Type *struct_to_return(Type *struct_ty) {
 static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   TypeKind fromKind = from->kind;
   TypeKind toKind = to->kind;
+  Type *fromBase = from->base;
+  Type *toBase = to->base;
 
   std::string fromTypeStr = ctypeKindString(fromKind);
   std::string toTypeStr = ctypeKindString(toKind);
-  // output << buildSeperator(stmt_level, "  cast: ");
-  // output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  output << buildSeperator(stmt_level, "  cast: ")
+        << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+
+  if (fromBase && toBase) {
+    fromTypeStr = ctypeKindString(fromBase->kind);
+    toTypeStr = ctypeKindString(toBase->kind);
+    output << buildSeperator(stmt_level, "base cast: ")
+        << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  }
+     
   
-  if (fromKind == toKind) {
+  if (fromKind == toKind && fromBase && toBase && fromBase->kind == toBase->kind) {
     return Base;
   }
 
@@ -359,6 +370,8 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
     target = Builder->CreateZExt(Base, targetTy);
   } else if (fromKind == TY_INT && toKind == TY_BOOL) {
     target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
+  } else {
+    target = Builder->CreateBitCast(Base, targetTy);
   }
   return target;
 }
@@ -383,8 +396,8 @@ static llvm::Value *gen_cast(Node *node) {
   std::string fromTypeStr = ctypeKindString(fromType->kind);
   Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
-  output << buildSeperator(stmt_level, "gen_cast");
-  output << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  output << buildSeperator(stmt_level, "gen_cast")
+  << " fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
   llvm::Value *V = nullptr;
   if (fromType->kind == TY_LONG && toType->kind == TY_PTR) {
     V = gen_expr(node->lhs->lhs);
@@ -395,6 +408,34 @@ static llvm::Value *gen_cast(Node *node) {
     V = gen_expr(node->lhs);
     V = cast(V, fromType, toType);
   }
+  return V;
+}
+
+/**
+ * char x = 1;
+ * char y = &x;
+ **/
+static llvm::Value *gen_get_addr(llvm::Value *baseAddr) {
+  return Builder->CreatePtrToInt(baseAddr, Builder->getInt64Ty());
+}
+
+static llvm::Value *gen_stmt_expr(Node *node) {
+  llvm::Value *V = nullptr;
+  int cur_level = ++stmt_level;
+  output << buildSeperator(cur_level, "gen_stmt_expr start") << std::endl;
+  for (Node *n = node->body; n && n->next; n = n->next) {
+    gen_stmt(n);
+  }
+  Node *last = node->last_expr;
+  if (last && last->kind == ND_EXPR_STMT) {
+    llvm::Value *lastV = gen_expr(last->lhs);
+    Obj *lastVar = node->last_var;
+    llvm::Value *lastAddr = find_var(lastVar->name);
+    genStore(lastV, lastAddr);
+    V = load(last->lhs->ty, lastAddr);
+  }
+  output << buildSeperator(cur_level, "gen_stmt_expr end") << std::endl;
+  --stmt_level;
   return V;
 }
 
@@ -538,9 +579,11 @@ static llvm::Value *gen_expr(Node *node) {
   output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr + " type:" + typeStr) << std::endl; 
   llvm::Value *V = nullptr;
   if (nodeType == nullptr) {
+    --stmt_level;
     return V;
   }
   if (kind == ND_NULL_EXPR) {
+    --stmt_level;
     return V;
   }
   cur_level++;
@@ -562,14 +605,19 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_assign(node);
       break;
     case ND_NUM:
-      output << buildSeperator(cur_level, "ND_NUM: " + std::to_string(node->val)) << std::endl; 
       V = llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), node->val);;
+      break;
+    case ND_NEG:
+      V = gen_expr(node->lhs);
       break;
     case ND_MEMZERO:
       output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << std::endl;
       break;
     case ND_VAR:
       V = gen_RValue(node);
+      break;
+    case ND_MEMBER:
+      V = gen_expr(node->lhs);
       break;
     case ND_DEREF:
       V = gen_expr(node->lhs);
@@ -579,6 +627,9 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_ADDR:
       V = gen_addr(node->lhs);
+      break;
+    case ND_STMT_EXPR:
+      V = gen_stmt_expr(node);
       break;
     case ND_CAST:
       V = gen_cast(node);
@@ -601,6 +652,11 @@ static llvm::Value *gen_expr(Node *node) {
     case ND_SUB:
       operandL = gen_expr(node->lhs);
       operandR = gen_expr(node->rhs);
+      if (node->lhs->ty->base && node->rhs->ty->base) {
+        // ptr - ptr
+        operandL = gen_get_addr(operandL);
+        operandR = gen_get_addr(operandR);
+      }
       if (node->ty->is_unsigned) {
         V = Builder->CreateNUWSub(operandL, operandR);
       } else {
@@ -751,17 +807,16 @@ static void gen_stmt(Node *node) {
   int level = ++stmt_level;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
-  output << buildSeperator(level, "gen_stmt start:") << " "<< cur_count << std::endl;
-  output << buildSeperator(level, kindStr) << std::endl;
+  output << buildSeperator(level, "gen_stmt start:")
+        << " "<< cur_count << " " << level
+        << " " << kindStr << std::endl;
   llvm::Value *tmpV;
   switch(kind) {
     case ND_IF:
       gen_if(node);
       break;
     case ND_BLOCK: // 32
-      for (Node *n = node->body; n; n = n->next) {
-        gen_stmt(n);
-      }
+      gen_compound_stmt(node);
       break;
     case ND_COMPOUND_STMT:
       gen_compound_stmt(node);
@@ -1370,24 +1425,23 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     output << "start local name: " << local->name << std::endl;
     locals.push_back(local);
   }
-  // reverse(locals.begin(), locals.end());
+  reverse(locals.begin(), locals.end());
 
-  static std::map<int, llvm::Value*> LocallAddress;
   for (std::vector<Obj *>::iterator iter = locals.begin();
     iter != locals.end(); iter++) {
     Obj *local = (*iter);
     std::string varName = local->name;
+    Type *ty = local->ty;
     output << "local name: " << varName
+      << " align " << local->align
       << " offset " << local->offset << std::endl;
     if (varName == "__alloca_size__" || varName == "__va_area__") {
       continue;
     }
-    Type *ty = local->ty;
     llvm::Type *localType = getTypeForArg(ty);
     llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
-    localAddr->setAlignment(llvm::Align(ty->align));
+    localAddr->setAlignment(llvm::Align(local->align));
     push_var(varName, localAddr);
-    LocallAddress[local->offset] = localAddr;
   }
 
   // reverse args
@@ -1403,9 +1457,10 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
   llvm::Function::arg_iterator AI, AE;
   for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI, arg_iter++) {
     Obj *arg = (*arg_iter);
-    output << "arg name: " << arg->name
+    std::string varName = arg->name;
+    output << "arg name: " << varName
       << " offset " << arg->offset << std::endl;
-    llvm::Value *argAddr = LocallAddress[arg->offset];
+    llvm::Value *argAddr = find_var(varName);
     TypeKind typeKind = arg->ty->kind;
     llvm::Value *fnArg = AI;
     if (typeKind == TY_BOOL) {
@@ -1507,6 +1562,7 @@ void gen_ir(Obj *prog, const std::string &filename) {
 	processAnnonVar(annonP);
 	emit_data(namedP);
   emit_function(namedP);
-	TheModule->dump();
+	TheModule->print(llvm::outs(), nullptr);
+  // TheModule->dump();
 }
 
