@@ -68,7 +68,17 @@ static void leave_scope(void) {
   scope = scope->next;
 }
 
-static llvm::Value *find_var(std::string var_name) {
+static std::string get_scope_name(Obj *var) {
+  std::string var_name = var->name;
+  if (var->is_local) {
+    int offset = var->offset;
+    var_name.append(std::to_string(offset));
+  }
+  return var_name;
+}
+
+static llvm::Value *find_var(Obj *var) {
+  std::string var_name = get_scope_name(var);
   for (BlockScope *sc = scope; sc; sc = sc->next) {
     llvm::Value *v = sc->vars[var_name];
     if (v) {
@@ -78,7 +88,8 @@ static llvm::Value *find_var(std::string var_name) {
   return nullptr;
 }
 
-static void push_var(std::string var_name, llvm::Value *v) {
+static void push_var(Obj *var, llvm::Value *v) {
+  std::string var_name = get_scope_name(var);
   scope->vars[var_name] = v;
 }
 
@@ -244,7 +255,7 @@ static llvm::Value *gen_addr(Node *node) {
           const std::string &Str = annonInitData[varName];
           Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
         } else if (var->is_local){
-          Addr = find_var(varName);
+          Addr = find_var(var);
           if (!Addr) {
             output << " empty originValue " << std::endl;
           }
@@ -255,7 +266,7 @@ static llvm::Value *gen_addr(Node *node) {
       }
       break;
     case ND_MEMBER:
-      Addr = gen_addr(node->lhs);
+      Addr = gen_member(node);
       break;
   }
   --stmt_level;
@@ -265,14 +276,16 @@ static llvm::Value *gen_addr(Node *node) {
 
 static llvm::Value *gen_memeber_ptr(Node *node, llvm::Value *ptrval) {
   llvm::Type *origPtrTy = yuc2LLVMType(node->lhs->ty);
-  
+
   Member *member = node->member;
   std::vector<llvm::Value *> IndexValues;
   IndexValues.push_back(get_offset_int32(0));
   IndexValues.push_back(get_offset_int32(member->idx));
 
-  llvm::Value *target = Builder->CreateInBoundsGEP(origPtrTy, ptrval, IndexValues);
-  return target;
+  output << buildSeperator(stmt_level, "gen_memeber_ptr idx")
+        << member->idx << std::endl;
+  // llvm::Value *target = Builder->CreateInBoundsGEP(origPtrTy, ptrval, IndexValues);
+  return nullptr;
 }
 
 static llvm::Value *gen_member(Node *node) {
@@ -282,7 +295,7 @@ static llvm::Value *gen_member(Node *node) {
   llvm::Value *ptr = gen_memeber_ptr(node, base);
   --stmt_level;
   output << buildSeperator(cur_level, "gen_member end") << std::endl;
-  return ptr;
+  return base;
 }
 
 static llvm::Type *struct_to_primitive(int size) {
@@ -430,7 +443,7 @@ static llvm::Value *gen_stmt_expr(Node *node) {
   if (last && last->kind == ND_EXPR_STMT) {
     llvm::Value *lastV = gen_expr(last->lhs);
     Obj *lastVar = node->last_var;
-    llvm::Value *lastAddr = find_var(lastVar->name);
+    llvm::Value *lastAddr = find_var(lastVar);
     genStore(lastV, lastAddr);
     V = load(last->lhs->ty, lastAddr);
   }
@@ -496,7 +509,7 @@ static llvm::Value *gen_LValue(Node *node) {
         if (var->is_static) {
           LValue = TheModule->getNamedGlobal(name);
         } else if (var->is_local) {
-          LValue = find_var(name);
+          LValue = find_var(var);
         } else {
           LValue = TheModule->getNamedGlobal(name);
         }
@@ -530,7 +543,7 @@ static llvm::Value *gen_prefix(Node *node, bool isInc) {
   operandR = gen_expr(node->rhs);
 
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
-  llvm::Value *targetAdd = find_var(node->lhs->var->name);
+  llvm::Value *targetAdd = find_var(node->lhs->var);
 
   genStore(sum, targetAdd);
   return sum;
@@ -570,6 +583,22 @@ static llvm::Value *emit_call(Node *node) {
   return V;
 }
 
+static llvm::Value *gen_number(Node *node) {
+  Type *nodeType = node->ty;
+  return llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), node->val);
+}
+
+static llvm::Value *gen_neg(Node *node) {
+  Node *target = node->lhs->lhs;
+  if (target->ty->kind == ND_NUM) {
+    node->val = -target->val;
+    return gen_number(target);
+  }
+  llvm::Value *targetV = gen_expr(target);
+  llvm::Value *left = llvm::ConstantInt::get(targetV->getType(), 0);
+  return Builder->CreateNUWSub(left, targetV);
+}
+
 static llvm::Value *gen_expr(Node *node) {
   int cur_level = ++stmt_level;
   NodeKind kind = node->kind;
@@ -605,10 +634,10 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_assign(node);
       break;
     case ND_NUM:
-      V = llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), node->val);;
+      V = gen_number(node);
       break;
     case ND_NEG:
-      V = gen_expr(node->lhs);
+      V = gen_neg(node);
       break;
     case ND_MEMZERO:
       output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << std::endl;
@@ -867,7 +896,9 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   llvm::StructType *type;
   int DesiredSize = ctype->size;
   Token *tag = ctype->tag;
-  output << "yuc2StructType DesiredSize:" << DesiredSize << " align:" << ctype->align << std::endl;
+  output << "yuc2StructType DesiredSize:" << DesiredSize 
+        << " is_typedef:" << ctype->is_typedef
+        << " align:" << ctype->align << std::endl;
   // union
   if (member) {
     int Size = member->ty->size;
@@ -893,11 +924,12 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   for (Member *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
-  if (ctype->is_typedef && !tag) {
+  if (!tag) {
     type = llvm::StructType::get(*TheContext, Types, false);
   } else {
     type = llvm::StructType::create(*TheContext, Types, "", false);
   }
+  output << "isLiteral: " << type->isLiteral() << std::endl;
   if (tag) {
     push_tag_scope(ctype->tag, type);
   }
@@ -1359,7 +1391,7 @@ static void SetLLVMFunctionAttributes(llvm::Function *F) {
 static llvm::Function *createFunc(Obj *funcNode) {
   std::string funcName = funcNode->name;
   output << "createFunc: " << funcName << std::endl;
-  llvm::Value *foo = find_var(funcName);
+  llvm::Value *foo = find_var(funcNode);
   if (foo) {
     return static_cast<llvm::Function *>(foo);
   }
@@ -1369,7 +1401,7 @@ static llvm::Function *createFunc(Obj *funcNode) {
   if(!funcNode->is_static) {
     fooFunc->setDSOLocal(true);
   }
-  push_var(funcName, fooFunc);
+  push_var(funcNode, fooFunc);
   return fooFunc;
 }
 
@@ -1441,7 +1473,7 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     llvm::Type *localType = getTypeForArg(ty);
     llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
     localAddr->setAlignment(llvm::Align(local->align));
-    push_var(varName, localAddr);
+    push_var(local, localAddr);
   }
 
   // reverse args
@@ -1460,7 +1492,7 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     std::string varName = arg->name;
     output << "arg name: " << varName
       << " offset " << arg->offset << std::endl;
-    llvm::Value *argAddr = find_var(varName);
+    llvm::Value *argAddr = find_var(arg);
     TypeKind typeKind = arg->ty->kind;
     llvm::Value *fnArg = AI;
     if (typeKind == TY_BOOL) {
@@ -1472,7 +1504,8 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
   if (funcNode->ty->return_ty->kind == TY_STRUCT) {
     llvm::Type *returnType = Func->getReturnType();
     llvm::Value *ret_alloca = Builder->CreateAlloca(returnType, nullptr);
-    push_var(".ret_alloca", ret_alloca);
+    // todo add it in parse phase
+    // push_var(".ret_alloca", ret_alloca);
   }
 }
 

@@ -1594,7 +1594,7 @@ void codegen(Obj *prog, FILE *out) {
   for (int i = 0; files[i]; i++)
     println("  .file %d \"%s\"", files[i]->file_no, files[i]->name);
   const string filename = files[0]->name;
-  // assign_lvar_offsets(prog);
+  assign_lvar_offsets(prog);
   // emit_data(prog);
   // emit_text(prog);
 

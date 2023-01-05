@@ -8,8 +8,8 @@ long g5;
 char g6;
 
 int main() {
-  ASSERT(-32, ({ _Alignas(32) char x, y; &x-&y; }));
-  ASSERT(32, ({ _Alignas(32) int *x, *y; ((char *)&x)-((char *)&y); }));
+  ASSERT(-8, ({ _Alignas(long) char x, y; &y-&x; }));
+  ASSERT(-32, ({ _Alignas(32) char x, y; &y-&x; }));
   printf("OK\n");
   return 0;
 }
