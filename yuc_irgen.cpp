@@ -603,6 +603,25 @@ static llvm::Value *gen_mod(Node *node) {
   return V;
 }
 
+static llvm::Value *gen_shl(Node *node) {
+  llvm::Value *operandL = gen_expr(node->lhs);
+  llvm::Value *operandR = gen_expr(node->rhs);
+  llvm::Value *V = Builder->CreateShl(operandL, operandR);
+  return V;
+}
+
+static llvm::Value *gen_shr(Node *node) {
+  llvm::Value *operandL = gen_expr(node->lhs);
+  llvm::Value *operandR = gen_expr(node->rhs);
+  llvm::Value *V = nullptr;
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateLShr(operandL, operandR);
+  } else {
+    V = Builder->CreateAShr(operandL, operandR);
+  }
+  return V;
+}
+
 static llvm::Value *gen_number(Node *node) {
   Type *nodeType = node->ty;
   uint64_t val = node->cast_reduced ? node->casted_val : node->val;
@@ -636,7 +655,7 @@ static llvm::Value *gen_expr(Node *node) {
     --stmt_level;
     return V;
   }
-  
+
   cur_level++;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
@@ -796,6 +815,12 @@ static llvm::Value *gen_expr(Node *node) {
       }
 
       V = Builder->CreateCmp(predicate, operandL, operandR);
+      break;
+    case ND_SHL:
+      V = gen_shl(node);
+      break;
+    case ND_SHR:
+      V = gen_shr(node);
       break;
     default:
       break;
