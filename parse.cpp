@@ -3419,7 +3419,7 @@ static void scan_globals(void) {
 
 static void declare_builtin_functions(void) {
   Type *ty = func_type(pointer_to(ty_void));
-  ty->params = copy_type(ty_int);
+  ty->params = copy_type(ty_long);
   builtin_alloca = new_gvar("alloca", ty);
   builtin_alloca->is_definition = false;
 }

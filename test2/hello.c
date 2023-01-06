@@ -8,10 +8,7 @@ long g5;
 char g6;
 
 int main() {
-ASSERT(0, ({ char x[16]; (unsigned long)&x % 16; }));
-  // ASSERT(0, ({ char x[17]; (unsigned long)&x % 16; }));
-  //ASSERT(0, ({ char x[100]; (unsigned long)&x % 16; }));
-  //ASSERT(0, ({ char x[101]; (unsigned long)&x % 16; }));
-  // printf("OK\n");
+   int *p1 = alloca(16);
+  printf("OK\n");
   return 0;
 }

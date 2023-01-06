@@ -40,6 +40,13 @@ static std::map<Obj *, llvm::Constant*> globalVars;
 static std::map<Type *, llvm::StructType*> tagToType;
 static llvm::Value *gen_number(Node *node);
 
+
+static int get_align(Obj *var) {
+  int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
+      ? MAX(16, var->align) : var->align;
+  return align;
+}
+
 static char *get_ident(Token *tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "expected an identifier");
@@ -343,7 +350,7 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
 
   std::string fromTypeStr = ctypeKindString(fromKind);
   std::string toTypeStr = ctypeKindString(toKind);
-  output << buildSeperator(stmt_level, "  cast: ")
+  output << buildSeperator(stmt_level, "cast: ")
         << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
 
   if (fromBase && toBase) {
@@ -385,8 +392,9 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
     target = Builder->CreateZExt(Base, targetTy);
   } else if (fromKind == TY_INT && toKind == TY_BOOL) {
     target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
-  } else if (fromKind == TY_PTR && 
-              (toKind == TY_PTR || toKind == TY_LONG)) {
+  } else if (fromKind == TY_PTR && toKind == TY_PTR) {
+    target = Builder->CreateBitCast(Base, targetTy);
+  } else if (fromKind == TY_PTR && toKind == TY_LONG) {
     target = gen_get_addr(Base);
   } else {
     target = Builder->CreateBitCast(Base, targetTy);
@@ -416,8 +424,9 @@ static llvm::Value *gen_cast(Node *node) {
   Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
   output << buildSeperator(stmt_level, "gen_cast")
-  << " fromType: " << fromTypeStr 
-  << " toType: " << toTypeStr << std::endl;
+        << " fromType: " << fromTypeStr 
+        << " toType: " << toTypeStr 
+        << " typeSize: " << toType->size << std::endl;
   llvm::Value *V = nullptr;
   if (node->cast_reduced) {
     V = gen_number(node);
@@ -578,10 +587,21 @@ static bool isNoReturn(std::string name) {
   return BuildSinks;
 }
 
+static llvm::Value *builtin_alloca(Node *node) {
+  llvm::Value *arg = gen_expr(node->args);
+  llvm::Type *ty = Builder->getInt8Ty();
+  llvm::AllocaInst * localAddr = Builder->CreateAlloca(ty, arg);
+  localAddr->setAlignment(llvm::Align(16));
+  return localAddr;
+} 
+
 static llvm::Value *emit_call(Node *node) {
   std::vector<llvm::Value *> ArgsV = push_args(node);
   std::string Callee = node->lhs->var->name;
   output <<"emit_call: " << Callee << std::endl;
+  if (Callee == "alloca") {
+    return builtin_alloca(node);
+  }
   llvm::Function *CalleeF = getFunction(Callee);
   llvm::Value *V = Builder->CreateCall(CalleeF, ArgsV, "");
 
@@ -1516,8 +1536,7 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     std::string varName = local->name;
     Type *ty = local->ty;
     Obj *var = local;
-    int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
-      ? MAX(16, var->align) : var->align;
+    int align = get_align(var);
     output << "local name: " << varName
       << " align " << align
       << " offset " << local->offset << std::endl;
