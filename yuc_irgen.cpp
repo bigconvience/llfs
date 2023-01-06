@@ -385,7 +385,8 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
     target = Builder->CreateZExt(Base, targetTy);
   } else if (fromKind == TY_INT && toKind == TY_BOOL) {
     target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
-  } else if (fromKind == TY_PTR && toKind == TY_PTR) {
+  } else if (fromKind == TY_PTR && 
+              (toKind == TY_PTR || toKind == TY_LONG)) {
     target = gen_get_addr(Base);
   } else {
     target = Builder->CreateBitCast(Base, targetTy);
@@ -1514,15 +1515,18 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     Obj *local = (*iter);
     std::string varName = local->name;
     Type *ty = local->ty;
+    Obj *var = local;
+    int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
+      ? MAX(16, var->align) : var->align;
     output << "local name: " << varName
-      << " align " << local->align
+      << " align " << align
       << " offset " << local->offset << std::endl;
     if (varName == "__alloca_size__" || varName == "__va_area__") {
       continue;
     }
     llvm::Type *localType = getTypeForArg(ty);
     llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
-    localAddr->setAlignment(llvm::Align(local->align));
+    localAddr->setAlignment(llvm::Align(align));
     push_var(local, localAddr);
   }
 
