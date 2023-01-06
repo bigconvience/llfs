@@ -299,6 +299,10 @@ struct Node {
   int64_t val;
   long double fval;
 
+  // reduce cast
+  bool cast_reduced;
+  uint64_t casted_val;
+  
   // stmt expr;
   Node *last_expr;
   Obj *last_var;

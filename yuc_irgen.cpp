@@ -33,10 +33,12 @@ static llvm::Constant *getOffset(long offset);
 static llvm::Value *gen_addr(Node *node);
 static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset);
 static llvm::Value *gen_member(Node *node);
+static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
 static std::map<Type *, llvm::StructType*> tagToType;
+static llvm::Value *gen_number(Node *node);
 
 static char *get_ident(Token *tok) {
   if (tok->kind != TK_IDENT)
@@ -383,6 +385,8 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
     target = Builder->CreateZExt(Base, targetTy);
   } else if (fromKind == TY_INT && toKind == TY_BOOL) {
     target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
+  } else if (fromKind == TY_PTR && toKind == TY_PTR) {
+    target = gen_get_addr(Base);
   } else {
     target = Builder->CreateBitCast(Base, targetTy);
   }
@@ -405,14 +409,18 @@ static llvm::Value *CreateConstArrayGEP(Node *node, llvm::Value *baseAddr, uint6
 }
 
 static llvm::Value *gen_cast(Node *node) {
-  Type *fromType = node->lhs->ty;
+  Node *origin = node->lhs;
+  Type *fromType = origin->ty;
   std::string fromTypeStr = ctypeKindString(fromType->kind);
   Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
   output << buildSeperator(stmt_level, "gen_cast")
-  << " fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  << " fromType: " << fromTypeStr 
+  << " toType: " << toTypeStr << std::endl;
   llvm::Value *V = nullptr;
-  if (fromType->kind == TY_LONG && toType->kind == TY_PTR) {
+  if (node->cast_reduced) {
+    V = gen_number(node);
+  } else if (fromType->kind == TY_LONG && toType->kind == TY_PTR) {
     V = gen_expr(node->lhs->lhs);
   } else if (fromType->kind == TY_ARRAY && toType->kind == TY_PTR) {
     llvm::Value *baseAddr = gen_addr(node->lhs);
@@ -583,14 +591,27 @@ static llvm::Value *emit_call(Node *node) {
   return V;
 }
 
+static llvm::Value *gen_mod(Node *node) {
+  llvm::Value *operandL = gen_expr(node->lhs);
+  llvm::Value *operandR = gen_expr(node->rhs);
+  llvm::Value *V = nullptr;
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateURem(operandL, operandR);
+  } else {
+    V = Builder->CreateSRem(operandL, operandR);
+  }
+  return V;
+}
+
 static llvm::Value *gen_number(Node *node) {
   Type *nodeType = node->ty;
-  return llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), node->val);
+  uint64_t val = node->cast_reduced ? node->casted_val : node->val;
+  return llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), val);
 }
 
 static llvm::Value *gen_neg(Node *node) {
   Node *target = node->lhs->lhs;
-  if (target->ty->kind == ND_NUM) {
+  if (target->kind == ND_NUM) {
     node->val = -target->val;
     return gen_number(target);
   }
@@ -615,6 +636,7 @@ static llvm::Value *gen_expr(Node *node) {
     --stmt_level;
     return V;
   }
+  
   cur_level++;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
@@ -709,6 +731,9 @@ static llvm::Value *gen_expr(Node *node) {
       } else {
         V = Builder->CreateSDiv(operandL, operandR);
       }
+      break;
+    case ND_MOD:
+      V = gen_mod(node);
       break;
     case ND_FUNCALL:
       V = emit_call(node);

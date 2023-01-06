@@ -20,8 +20,6 @@
 #include <iostream>
 #include <cstring>
 
-static void dump_type(Type *type, int level);
-
 // Scope for local variables, global variables, typedefs
 // or enum constants
 typedef struct {
@@ -257,6 +255,13 @@ Node *new_cast(Node *expr, Type *ty) {
   node->tok = expr->tok;
   node->lhs = expr;
   node->ty = copy_type(ty);
+  if (expr->kind == ND_NUM) {
+    node->cast_reduced = true;
+    node->casted_val = eval(expr);
+  } else {
+    node->cast_reduced = expr->cast_reduced;
+    node->casted_val = expr->casted_val;
+  }
   return node;
 }
 
@@ -2438,8 +2443,6 @@ static Node *new_sub(Node *lhs, Node *rhs, Token *tok) {
 
   // ptr - num
   if (lhs->ty->base && is_integer(rhs->ty)) {
-    std::cout << "\nptr - num:" << std::endl;
-    dump_type(lhs->ty, 0);
     rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
     add_type(rhs);
     Node *node = new_binary(ND_SUB, lhs, rhs, tok);
@@ -2460,7 +2463,6 @@ static Node *new_sub(Node *lhs, Node *rhs, Token *tok) {
 // add = mul ("+" mul | "-" mul)*
 static Node *add(Token **rest, Token *tok) {
   Node *node = mul(&tok, tok);
-
   for (;;) {
     Token *start = tok;
 
@@ -3454,27 +3456,4 @@ Obj *parse(Token *tok) {
   // Remove redundant tentative definitions.
   scan_globals();
   return globals;
-}
-
-void dump_type(Type *type, int level) {
-  if (!type) {
-    return;
-  }
-
-  for (int i = 0; i < level; i++) {
-    std::cout << " ";
-  }
-  std::cout << "kind: " << type->kind
-    << " size: " << type->size
-    << " align: " << type->align
-    << " array_len: " << type->array_len;
-    std::cout << std::endl;
-  if (type->origin) {
-    std::cout << "origin: ";
-    dump_type(type->origin, level + 1);
-  }
-  if (type->base) {
-    std::cout << "base: ";
-    dump_type(type->base, level + 1);
-  }
 }
