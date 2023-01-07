@@ -1,14 +1,17 @@
 #include "test.h"
 
-int _Alignas(512) g1;
-int _Alignas(512) g2;
-char g3;
-int g4;
-long g5;
-char g6;
+void *fn(int x, void *p, int y) { return p; }
 
 int main() {
-   int *p1 = alloca(16);
+  int i = 0;
+
+  char *p1 = alloca(16);
+  char *p2 = alloca(16);
+ char *p3 = 1 + (char *)alloca(3) + 1;
+ p3 = p3 - 2;
+ char *p4 = fn(1, alloca(16), 3);
+  ASSERT(16, p1 - p2);
+
   printf("OK\n");
   return 0;
 }

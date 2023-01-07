@@ -234,9 +234,18 @@ typedef enum {
   ND_PREFIX_DEC, // --prefix
 } NodeKind;
 
+// operand kind
+typedef enum {
+  NUM_NUM, // num (+|-) num
+  VLA_NUM, // VLA (+|-) num
+  PTR_NUM, // ptr (+|-) num
+  PTR_PTR, // ptr - ptr
+} OperandKind;
+
 // AST node type
 struct Node {
   NodeKind kind; // Node kind
+  OperandKind o_kind; // Operand kind
   Node *next;    // Next node
   Type *ty;      // Type, e.g. int or pointer to int
   Token *tok;    // Representative token

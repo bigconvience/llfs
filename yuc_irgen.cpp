@@ -426,6 +426,7 @@ static llvm::Value *gen_cast(Node *node) {
   output << buildSeperator(stmt_level, "gen_cast")
         << " fromType: " << fromTypeStr 
         << " toType: " << toTypeStr 
+        << " cast_reduced: " << node->cast_reduced
         << " typeSize: " << toType->size << std::endl;
   llvm::Value *V = nullptr;
   if (node->cast_reduced) {
@@ -472,8 +473,8 @@ static llvm::Value *gen_stmt_expr(Node *node) {
 
 static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset) {
   int cur_level = ++stmt_level;
-  output << buildSeperator(cur_level, "gen_get_ptr: " + ctypeKindString(node->ty->kind)) << std::endl;
-  output << buildSeperator(cur_level, "gen_get_ptr base: " + ctypeKindString(node->ty->base->kind)) << std::endl; 
+  output << buildSeperator(cur_level, "gen_get_ptr: " + ctypeKindString(node->ty->kind))
+       << " baseTy: " << ctypeKindString(node->ty->base->kind) << std::endl; 
   llvm::Value *target = nullptr;
   llvm::Type *origPtrTy = nullptr;
   std::vector<llvm::Value *> IndexValues;
@@ -493,7 +494,7 @@ static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *
 static llvm::Value *gen_add_2(Node *node,
     llvm::Value *operandL, llvm::Value *operandR) {
   llvm::Value *V = nullptr;
-  if (node->ty->kind == TY_PTR || node->ty->kind == TY_ARRAY) {
+  if (node->o_kind == PTR_NUM) {
     V = gen_get_ptr(node->lhs->lhs, operandL, operandR);
   } else if (node->ty->is_unsigned) {
     V = Builder->CreateNUWAdd(operandL, operandR);
@@ -512,6 +513,53 @@ static llvm::Value *gen_add(Node *node) {
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
   return gen_add_2(node, operandL, operandR);
+}
+
+static llvm::Value *gen_sub(Node *node) {
+  llvm::Value *operandL, *operandR, *V;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  if (node->o_kind == PTR_PTR) {
+    // ptr - ptr
+    operandL = gen_get_addr(operandL);
+    operandR = gen_get_addr(operandR);
+  } else if (node->o_kind == PTR_NUM) {
+    // ptr - num
+    operandR = Builder->CreateNeg(operandR);
+    V = gen_get_ptr(node, operandL, operandR);
+    return V;
+  }
+
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateNUWSub(operandL, operandR);
+  } else {
+    V = Builder->CreateNSWSub(operandL, operandR);
+  }
+  return V;
+}
+
+static llvm::Value *gen_mul(Node *node) {
+  llvm::Value *operandL, *operandR, *V;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateNUWMul(operandL, operandR);
+  } else {
+    V = Builder->CreateNSWMul(operandL, operandR);
+  }
+  return V;
+}
+
+static llvm::Value *gen_div(Node *node) {
+  llvm::Value *operandL, *operandR, *V;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateUDiv(operandL, operandR);
+  } else {
+    V = Builder->CreateSDiv(operandL, operandR);
+  }
+  return V;
 }
 
 static llvm::Value *gen_LValue(Node *node) {
@@ -646,6 +694,7 @@ static llvm::Value *gen_shr(Node *node) {
 static llvm::Value *gen_number(Node *node) {
   Type *nodeType = node->ty;
   uint64_t val = node->cast_reduced ? node->casted_val : node->val;
+  output << "gen_number array_index: " << nodeType->array_index << std::endl; 
   return llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), val);
 }
 
@@ -741,36 +790,13 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_add(node);
       break;
     case ND_SUB:
-      operandL = gen_expr(node->lhs);
-      operandR = gen_expr(node->rhs);
-      if (node->lhs->ty->base && node->rhs->ty->base) {
-        // ptr - ptr
-        operandL = gen_get_addr(operandL);
-        operandR = gen_get_addr(operandR);
-      }
-      if (node->ty->is_unsigned) {
-        V = Builder->CreateNUWSub(operandL, operandR);
-      } else {
-        V = Builder->CreateNSWSub(operandL, operandR);
-      }
+      V = gen_sub(node);
       break;
     case ND_MUL:
-      operandL = gen_expr(node->lhs);
-      operandR = gen_expr(node->rhs);
-      if (node->ty->is_unsigned) {
-        V = Builder->CreateNUWAdd(operandL, operandR);
-      } else {
-        V = Builder->CreateNSWAdd(operandL, operandR);
-      }
+      V = gen_mul(node);
       break;
     case ND_DIV:
-      operandL = gen_expr(node->lhs);
-      operandR = gen_expr(node->rhs);
-      if (node->ty->is_unsigned) {
-        V = Builder->CreateUDiv(operandL, operandR);
-      } else {
-        V = Builder->CreateSDiv(operandL, operandR);
-      }
+      V = gen_div(node);
       break;
     case ND_MOD:
       V = gen_mod(node);
@@ -945,7 +971,13 @@ static llvm::ArrayType *yuc2ArrayType(Type *ctype) {
 
 static llvm::Type *yuc2PointerType(Type *ctype) {
   // output << "yuc2PointerType baseType ";
-  llvm::Type *base = yuc2LLVMType(ctype->base);
+  Type *baseTy = ctype->base;
+  llvm::Type *base = nullptr;
+  if (baseTy->kind == TY_VOID) {
+    base = Builder->getInt8Ty();
+  } else {
+    base = yuc2LLVMType(baseTy);
+  }
   llvm::Type *type = llvm::PointerType::get(base, 0);
   return type;
 }
