@@ -2167,21 +2167,24 @@ static Node *to_assign(Node *binary) {
   }
 
   // Convert `A op= B` to ``tmp = &A, *tmp = *tmp op B`.
-  Obj *var = new_lvar("", pointer_to(binary->lhs->ty));
+  // Obj *var = new_lvar("", pointer_to(binary->lhs->ty));
 
-  Node *expr1 = new_binary(ND_ASSIGN, new_var_node(var, tok),
-                           new_unary(ND_ADDR, binary->lhs, tok), tok);
+  // Node *expr1 = new_binary(ND_ASSIGN, new_var_node(var, tok),
+  //                          new_unary(ND_ADDR, binary->lhs, tok), tok);
 
-  Node *expr2 =
-    new_binary(ND_ASSIGN,
-               new_unary(ND_DEREF, new_var_node(var, tok), tok),
-               new_binary(binary->kind,
-                          new_unary(ND_DEREF, new_var_node(var, tok), tok),
-                          binary->rhs,
-                          tok),
-               tok);
+  // Node *expr2 =
+  //   new_binary(ND_ASSIGN,
+  //              new_unary(ND_DEREF, new_var_node(var, tok), tok),
+  //              new_binary(binary->kind,
+  //                         new_unary(ND_DEREF, new_var_node(var, tok), tok),
+  //                         binary->rhs,
+  //                         tok),
+  //              tok);
 
-  return new_binary(ND_COMMA, expr1, expr2, tok);
+  // return new_binary(ND_COMMA, expr1, expr2, tok);
+
+  Node *node = new_binary(ND_ASSIGN, binary->lhs, binary, tok);
+  return node;
 }
 
 // assign    = conditional (assign-op assign)?
