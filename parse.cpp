@@ -2422,7 +2422,6 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
   }
 
   // ptr + num
-  rhs->ty->array_index = true;
   rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
   node = new_binary(ND_ADD, lhs, rhs, tok);
   node->o_kind = PTR_NUM;

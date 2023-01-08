@@ -643,13 +643,28 @@ static llvm::Value *builtin_alloca(Node *node) {
   return localAddr;
 } 
 
+static llvm::Value *builtin_memcpy(Node *node) {
+  Node *dst = node->args;
+  Node *src = dst->next;
+  Node *size = src->next;
+  llvm::Value *Dst = gen_expr(dst);
+  llvm::Value *Src = gen_expr(src);
+  llvm::Value *Size = gen_expr(size);
+  llvm::MaybeAlign Align = llvm::MaybeAlign(1);
+  llvm::CallInst *callInst 
+    = Builder->CreateMemCpy(Dst, Align, Src, Align, Size);
+  return callInst;
+}
+
 static llvm::Value *emit_call(Node *node) {
-  std::vector<llvm::Value *> ArgsV = push_args(node);
   std::string Callee = node->lhs->var->name;
   output <<"emit_call: " << Callee << std::endl;
   if (Callee == "alloca") {
     return builtin_alloca(node);
+  } else if (Callee == "memcpy") {
+    return builtin_memcpy(node);
   }
+  std::vector<llvm::Value *> ArgsV = push_args(node);
   llvm::Function *CalleeF = getFunction(Callee);
   llvm::Value *V = Builder->CreateCall(CalleeF, ArgsV, "");
 
@@ -694,8 +709,7 @@ static llvm::Value *gen_shr(Node *node) {
 static llvm::Value *gen_number(Node *node) {
   Type *nodeType = node->ty;
   uint64_t val = node->cast_reduced ? node->casted_val : node->val;
-  output << "gen_number array_index: " << nodeType->array_index << std::endl; 
-  return llvm::ConstantInt::get(nodeType->array_index ? Builder->getInt64Ty() : yuc2LLVMType(nodeType), val);
+  return llvm::ConstantInt::get(yuc2LLVMType(nodeType), val);
 }
 
 static llvm::Value *gen_neg(Node *node) {
