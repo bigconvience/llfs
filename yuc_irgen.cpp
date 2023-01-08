@@ -424,10 +424,12 @@ static llvm::Value *gen_cast(Node *node) {
   Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
   output << buildSeperator(stmt_level, "gen_cast")
-        << " fromType: " << fromTypeStr 
+        << " fromType: " << fromTypeStr
+        << " fromSize: " << toType->size  
         << " toType: " << toTypeStr 
+        << " toSize: " << toType->size 
         << " cast_reduced: " << node->cast_reduced
-        << " typeSize: " << toType->size << std::endl;
+        << std::endl;
   llvm::Value *V = nullptr;
   if (node->cast_reduced) {
     V = gen_number(node);
@@ -621,7 +623,7 @@ static llvm::Value *gen_assign(Node *node) {
   operandL = gen_LValue(node->lhs);
   operandR = gen_expr(node->rhs);
   genStore(operandR, operandL);
-  return operandL;
+  return operandR;
 }
 
 static bool isNoReturn(std::string name) {
@@ -675,6 +677,86 @@ static llvm::Value *emit_call(Node *node) {
   return V;
 }
 
+static llvm::Value *gen_relational(Node *node) {
+  output <<"gen_relational " << std::endl;
+  llvm::Value *operandL, *operandR, *V;
+  NodeKind kind = node->kind;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  llvm::CmpInst::Predicate predicate;
+  Type* nodeType = node->ty;
+  TypeKind typeKind = nodeType->kind;
+
+  if (kind == ND_LT) {
+    if (isFloatTypeKind(typeKind)) {
+      if (nodeType->is_unsigned) {
+        predicate = llvm::CmpInst::Predicate::FCMP_ULT;
+      } else {
+        predicate = llvm::CmpInst::Predicate::FCMP_OLT;
+      }
+    } else {
+      if (nodeType->is_unsigned) {
+        predicate = llvm::CmpInst::Predicate::ICMP_ULT;
+      } else {
+        predicate = llvm::CmpInst::Predicate::ICMP_SLT;
+      }
+    }
+  } else if (kind == ND_LE) {
+    if (isFloatTypeKind(typeKind)) {
+      if (nodeType->is_unsigned) {
+        predicate = llvm::CmpInst::Predicate::FCMP_ULE;
+      } else {
+        predicate = llvm::CmpInst::Predicate::FCMP_OLE;
+      }
+    } else {
+      if (nodeType->is_unsigned) {
+        predicate = llvm::CmpInst::Predicate::ICMP_ULE;
+      } else {
+        predicate = llvm::CmpInst::Predicate::ICMP_SLE;
+      }
+    }
+  }
+
+  V = Builder->CreateCmp(predicate, operandL, operandR);
+  return V; 
+}
+
+static llvm::Value *gen_equality(Node *node) {
+  output <<"gen_equality " << std::endl;
+  llvm::Value *operandL, *operandR, *V;
+  NodeKind kind = node->kind;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  llvm::CmpInst::Predicate predicate;
+  Type* nodeType = node->ty;
+  TypeKind typeKind = nodeType->kind;
+
+  if (kind == ND_EQ) {
+    if (isFloatTypeKind(typeKind)) {
+      if (nodeType->is_unsigned) {
+        predicate = llvm::CmpInst::Predicate::FCMP_UEQ;
+      } else {
+        predicate = llvm::CmpInst::Predicate::FCMP_OEQ;
+      }
+    } else {
+      predicate = llvm::CmpInst::Predicate::ICMP_EQ;
+    }
+  } else if (kind == ND_NE) {
+    if (isFloatTypeKind(typeKind)) {
+      if (nodeType->is_unsigned) {
+        predicate = llvm::CmpInst::Predicate::FCMP_UNE;
+      } else {
+        predicate = llvm::CmpInst::Predicate::FCMP_ONE;
+      }
+    } else {
+      predicate = llvm::CmpInst::Predicate::ICMP_NE;
+    }
+  }
+
+  V = Builder->CreateCmp(predicate, operandL, operandR);
+  return V; 
+}
+
 static llvm::Value *gen_mod(Node *node) {
   llvm::Value *operandL = gen_expr(node->lhs);
   llvm::Value *operandR = gen_expr(node->rhs);
@@ -709,13 +791,14 @@ static llvm::Value *gen_shr(Node *node) {
 static llvm::Value *gen_number(Node *node) {
   Type *nodeType = node->ty;
   uint64_t val = node->cast_reduced ? node->casted_val : node->val;
+  output <<"gen_number: " << val << std::endl;
   return llvm::ConstantInt::get(yuc2LLVMType(nodeType), val);
 }
 
 static llvm::Value *gen_neg(Node *node) {
   Node *target = node->lhs->lhs;
   if (target->kind == ND_NUM) {
-    node->val = -target->val;
+    target->val = -target->val;
     return gen_number(target);
   }
   llvm::Value *targetV = gen_expr(target);
@@ -743,8 +826,6 @@ static llvm::Value *gen_expr(Node *node) {
   cur_level++;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
-  TypeKind typeKind = nodeType->kind;
-  llvm::CmpInst::Predicate predicate;
   switch(kind) {
     case ND_NULL_EXPR:
       break;
@@ -820,62 +901,11 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_EQ:
     case ND_NE:
+      V = gen_equality(node);
+      break;
     case ND_LT:
     case ND_LE:
-      operandL = gen_expr(node->lhs);
-      operandR = gen_expr(node->rhs);
-
-      if (kind == ND_EQ) {
-        if (isFloatTypeKind(typeKind)) {
-          if (nodeType->is_unsigned) {
-            predicate = llvm::CmpInst::Predicate::FCMP_UEQ;
-          } else {
-            predicate = llvm::CmpInst::Predicate::FCMP_OEQ;
-          }
-        } else {
-          predicate = llvm::CmpInst::Predicate::ICMP_EQ;
-        }
-      } else if (kind == ND_NE) {
-        if (isFloatTypeKind(typeKind)) {
-          if (nodeType->is_unsigned) {
-            predicate = llvm::CmpInst::Predicate::FCMP_UNE;
-          } else {
-            predicate = llvm::CmpInst::Predicate::FCMP_ONE;
-          }
-        } else {
-          predicate = llvm::CmpInst::Predicate::ICMP_NE;
-        }
-      } else if (kind == ND_LT) {
-        if (isFloatTypeKind(typeKind)) {
-          if (nodeType->is_unsigned) {
-            predicate = llvm::CmpInst::Predicate::FCMP_ULT;
-          } else {
-            predicate = llvm::CmpInst::Predicate::FCMP_OLT;
-          }
-        } else {
-          if (nodeType->is_unsigned) {
-            predicate = llvm::CmpInst::Predicate::ICMP_ULT;
-          } else {
-            predicate = llvm::CmpInst::Predicate::ICMP_SLT;
-          }
-        }
-      } else if (kind == ND_LE) {
-        if (isFloatTypeKind(typeKind)) {
-          if (nodeType->is_unsigned) {
-            predicate = llvm::CmpInst::Predicate::FCMP_ULE;
-          } else {
-            predicate = llvm::CmpInst::Predicate::FCMP_OLE;
-          }
-        } else {
-          if (nodeType->is_unsigned) {
-            predicate = llvm::CmpInst::Predicate::ICMP_ULE;
-          } else {
-            predicate = llvm::CmpInst::Predicate::ICMP_SLE;
-          }
-        }
-      }
-
-      V = Builder->CreateCmp(predicate, operandL, operandR);
+      V = gen_relational(node);
       break;
     case ND_SHL:
       V = gen_shl(node);
