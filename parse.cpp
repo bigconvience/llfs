@@ -258,6 +258,9 @@ Node *new_cast(Node *expr, Type *ty) {
   if (expr->kind == ND_NUM) {
     node->cast_reduced = true;
     node->casted_val = eval(expr);
+    if (ty->kind == TY_PTR) {
+      node->ty = ty_long;
+    }
   } else {
     node->cast_reduced = expr->cast_reduced;
     node->casted_val = expr->casted_val;
@@ -2425,7 +2428,7 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
   }
 
   // ptr + num
-  rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
+  // rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
   node = new_binary(ND_ADD, lhs, rhs, tok);
   node->o_kind = PTR_NUM;
   return node;
@@ -2868,7 +2871,6 @@ static Node *new_inc_dec(Node *node, Token *tok, int addend) {
 }
 
 static Node *new_prefix(Node *node, Token *tok, int addend) {
-  std::cout << "new prefix" << std::endl;
   add_type(node);
   Node *inc_dec;
   if (addend > 0) {

@@ -2,7 +2,9 @@
 
 
 int main() {
-  ASSERT(3, ({ int i=2; ++i; }));
+  int a[3];
+    ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2;}));
+
 
   printf("OK\n");
   return 0;
