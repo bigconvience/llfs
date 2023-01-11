@@ -229,27 +229,33 @@ static llvm::Value* load(Type *ty, llvm::Value *originValue) {
   return Builder->CreateLoad(type, originValue);
 }
 
-static llvm::Value *gen_var(Node *node) {
-  Obj *var = node->var;
-  llvm::Value *Addr = gen_addr(node);
-  return Addr; 
-}
 
-static llvm::Value *gen_RValue(Node *node) {
+static llvm::Value *gen_rvalue(Node *node) {
   int cur_level = ++stmt_level;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
-  output << buildSeperator(cur_level, "gen_RValue start:" + kindStr) << std::endl;
+  output << buildSeperator(cur_level, "gen_rvalue start:" + kindStr) << std::endl;
   Obj *var = node->var;
   llvm::Value *Addr = gen_addr(node);
-  llvm::Type *type = getTypeForArg(var->ty);
-  Addr = Builder->CreateLoad(type, Addr);
-  if (var->ty->kind == TY_BOOL) {
-    Addr = Builder->CreateTrunc(Addr, Builder->getInt1Ty());
+  llvm::Value *V = nullptr;
+  if (node->ty->kind == TY_ARRAY) {
+    // r_value(arr) =  GEP(array, 0, 0);
+    V = gen_get_ptr(node, Addr, getOffset(0));
+  } else {
+    llvm::Type *type = getTypeForArg(var->ty);
+    V = Builder->CreateLoad(type, Addr);
+    if (var->ty->kind == TY_BOOL) {
+      V = Builder->CreateTrunc(Addr, Builder->getInt1Ty());
+    }
   }
   --stmt_level;
-  output << buildSeperator(cur_level, "gen_RValue end") << std::endl;
-  return Addr;  
+  output << buildSeperator(cur_level, "gen_rvalue end") << std::endl;
+  return V;  
+}
+
+static llvm::Value *gen_var(Node *node) {
+  llvm::Value *Addr = gen_rvalue(node);
+  return Addr; 
 }
 
 static llvm::Value *gen_addr(Node *node) {
@@ -288,6 +294,11 @@ static llvm::Value *gen_addr(Node *node) {
   --stmt_level;
   output << buildSeperator(cur_level, "gen_addr end") << std::endl;
   return Addr;
+}
+
+llvm::Value *gen_deref(Node *node) {
+  llvm::Value *V = gen_expr(node);
+  return load(node->ty, V);
 }
 
 static llvm::Value *gen_memeber_ptr(Node *node, llvm::Value *ptrval) {
@@ -372,7 +383,7 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   }
    
 
-  if (sameTypeKind &&sameBaseTypeKind) {
+  if (sameTypeKind && sameBaseTypeKind) {
     output << buildSeperator(stmt_level, "cast: do not cast") << std::endl;
     return Base;
   }
@@ -507,13 +518,15 @@ static llvm::Value *gen_add_2(Node *node,
     llvm::Value *operandL, llvm::Value *operandR) {
   llvm::Value *V = nullptr;
   if (node->o_kind == PTR_NUM) {
-    V = gen_get_ptr(node->lhs->lhs, operandL, operandR);
+    // ptr + num -> GEP(ptr, num)
+    // arr + num -> GEP(arr, 0, num)
+    V = gen_get_ptr(node->lhs, operandL, operandR);
   } else if (node->ty->is_unsigned) {
     V = Builder->CreateNUWAdd(operandL, operandR);
   } else {
     V = Builder->CreateNSWAdd(operandL, operandR);
   }
-  return V;
+  return operandL;
 }
 
 static void genStore(llvm::Value *V, llvm::Value *Addr) {
@@ -836,10 +849,7 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_expr(node->lhs);
       break;
     case ND_DEREF:
-      V = gen_expr(node->lhs);
-      if (node->ty->kind != TY_ARRAY && node->lhs->ty->kind == TY_PTR) {
-        V = load(node->ty, V);
-      }
+      V = gen_deref(node);
       break;
     case ND_ADDR:
       V = gen_addr(node->lhs);

@@ -232,6 +232,7 @@ typedef enum {
   ND_POST_DEC, // post--
   ND_PREFIX_INC, // ++prefix
   ND_PREFIX_DEC, // --prefix
+  ND_SUBSCRIPT, // postfix arr[idx]
 } NodeKind;
 
 // operand kind
