@@ -2825,7 +2825,6 @@ static Node *new_subscript(Node *lhs, Node *rhs, Token *tok) {
   add_type(lhs);
   rhs->ty = ty_long;
   Node *node = new_binary(ND_SUBSCRIPT, lhs, rhs, tok);
-  std::cout << "new_subscript " << std::endl;
   return node;
 }
 
@@ -2862,6 +2861,22 @@ static Node *struct_ref(Node *node, Token *tok) {
   return node;
 }
 
+static void add_o_kind(Node *node) {
+  Node *lhs = node->lhs;
+  if (lhs->ty->base) {
+    if (lhs->ty->base->kind == TY_VLA) {
+      // VLA + num
+      node->o_kind = VLA_NUM;
+    } else {
+      // ptr + num
+      node->o_kind = PTR_NUM;
+    }
+  } else {
+    // num + num
+    node->o_kind = NUM_NUM;
+  } 
+}
+
 // Convert A++ to `(typeof A)((A += 1) - 1)`
 static Node *new_inc_dec(Node *node, Token *tok, int addend) {
   add_type(node);
@@ -2872,7 +2887,8 @@ static Node *new_inc_dec(Node *node, Token *tok, int addend) {
     inc_dec = new_unary(ND_POST_DEC, node, tok);
   }
   inc_dec->rhs = new_num(addend, tok);
-  add_type(inc_dec);
+  //add_type(inc_dec);
+  add_o_kind(inc_dec);
   return inc_dec;
   // return new_cast(new_add(to_assign(new_add(node, new_num(addend, tok), tok)),
   //                         new_num(-addend, tok), tok),
@@ -2888,6 +2904,7 @@ static Node *new_prefix(Node *node, Token *tok, int addend) {
     inc_dec = new_unary(ND_PREFIX_DEC, node, tok);
   }
   inc_dec->rhs = new_num(addend, tok);
+  add_o_kind(inc_dec);
   // add_type(inc_dec);
   return inc_dec;
 }
@@ -2937,7 +2954,6 @@ static Node *postfix(Token **rest, Token *tok) {
       // add type first
       add_type(node);
       if (node->ty->kind == TY_ARRAY) {
-        std::cout << "array new_subscript" << std::endl;
         // array[idx] -> array subscripting
         node = new_subscript(node, idx, start);
       } else {

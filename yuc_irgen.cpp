@@ -311,7 +311,7 @@ static llvm::Value *gen_addr(Node *node) {
 }
 
 llvm::Value *gen_deref(Node *node) {
-  llvm::Value *V = gen_expr(node);
+  llvm::Value *V = gen_addr(node);
   return load(node->ty, V);
 }
 
@@ -540,7 +540,7 @@ static llvm::Value *gen_add_2(Node *node,
   } else {
     V = Builder->CreateNSWAdd(operandL, operandR);
   }
-  return operandL;
+  return V;
 }
 
 static void genStore(llvm::Value *V, llvm::Value *Addr) {
@@ -602,14 +602,13 @@ static llvm::Value *gen_div(Node *node) {
 }
 
 static llvm::Value *gen_postfix(Node *node, bool isInc) {
-  llvm::Value *operandL, *operandR;
-  operandL = gen_expr(node->lhs);
+  llvm::Value *targetAddr, *operandL, *operandR;
+  targetAddr = gen_addr(node->lhs);
+  operandL = load(node->lhs->ty, targetAddr);
   operandR = gen_expr(node->rhs);
 
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
-  llvm::Value *targetAdd = gen_addr(node->lhs);
-
-  genStore(sum, targetAdd);
+  genStore(sum, targetAddr);
   return operandL;
 }
 
