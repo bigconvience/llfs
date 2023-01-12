@@ -258,6 +258,17 @@ static llvm::Value *gen_var(Node *node) {
   return Addr; 
 }
 
+static llvm::Value *gen_subscript_addr(Node *node) {
+  llvm::Value *Arr = gen_addr(node->lhs);
+  llvm::Value *offset = gen_expr(node->rhs);
+  return gen_get_ptr(node->lhs, Arr, offset); 
+}
+
+static llvm::Value *gen_subscript(Node *node) {
+  llvm::Value *Addr = gen_subscript_addr(node);
+  return load(node->ty, Addr); 
+}
+
 static llvm::Value *gen_addr(Node *node) {
   int cur_level = ++stmt_level;
   llvm::Value *Addr = nullptr;
@@ -289,6 +300,9 @@ static llvm::Value *gen_addr(Node *node) {
       break;
     case ND_DEREF:
       Addr = gen_expr(node->lhs);
+      break;
+    case ND_SUBSCRIPT: 
+      Addr = gen_subscript_addr(node);
       break;
   }
   --stmt_level;
@@ -903,6 +917,9 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_SHR:
       V = gen_shr(node);
+      break;
+    case ND_SUBSCRIPT:
+      V = gen_subscript(node);
       break;
     default:
       break;

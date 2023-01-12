@@ -275,6 +275,14 @@ void add_type(Node *node) {
       node->ty = pointer_to(ty);
     return;
   }
+  case ND_SUBSCRIPT:
+    if (!node->lhs->ty->base)
+      error_tok(node->tok, "invalid array dereference");
+    if (node->lhs->ty->base->kind == TY_VOID)
+      error_tok(node->tok, "subscript a void pointer");
+
+    node->ty = node->lhs->ty->base;
+    return;
   case ND_DEREF:
     if (!node->lhs->ty->base)
       error_tok(node->tok, "invalid pointer dereference");

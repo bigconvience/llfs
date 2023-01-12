@@ -2820,6 +2820,15 @@ static Member *get_struct_member(Type *ty, Token *tok) {
   return NULL;
 }
 
+// Create a node representing an array subscripting
+static Node *new_subscript(Node *lhs, Node *rhs, Token *tok) {
+  add_type(lhs);
+  rhs->ty = ty_long;
+  Node *node = new_binary(ND_SUBSCRIPT, lhs, rhs, tok);
+  std::cout << "new_subscript " << std::endl;
+  return node;
+}
+
 // Create a node representing a struct member access, such as foo.bar
 // where foo is a struct and bar is a member name.
 //
@@ -2925,7 +2934,16 @@ static Node *postfix(Token **rest, Token *tok) {
       Token *start = tok;
       Node *idx = expr(&tok, tok->next);
       tok = skip(tok, "]");
-      node = new_unary(ND_DEREF, new_add(node, idx, start), start);
+      // add type first
+      add_type(node);
+      if (node->ty->kind == TY_ARRAY) {
+        std::cout << "array new_subscript" << std::endl;
+        // array[idx] -> array subscripting
+        node = new_subscript(node, idx, start);
+      } else {
+        // ptr[idx] -> *(ptr + idx);
+        node = new_unary(ND_DEREF, new_add(node, idx, start), start);
+      }
       continue;
     }
 

@@ -662,6 +662,8 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_PREFIX_INC";
     case ND_PREFIX_DEC:
       return "ND_PREFIX_DEC";
+    case ND_SUBSCRIPT:
+      return "ND_SUBSCRIPT";
     default:
       return "unkonw";
   }
