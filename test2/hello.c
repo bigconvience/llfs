@@ -3,8 +3,7 @@
 
 int main() {
   int a[3];
-  a[2];
-  //int *p1 = &p[1];
+  int *p=a+1; ++*p;
 
 
   printf("OK\n");

@@ -614,14 +614,13 @@ static llvm::Value *gen_postfix(Node *node, bool isInc) {
 }
 
 static llvm::Value *gen_prefix(Node *node, bool isInc) {
-  llvm::Value *operandL, *operandR;
-  operandL = gen_expr(node->lhs);
+  llvm::Value *targetAddr, *operandL, *operandR;
+  targetAddr = gen_addr(node->lhs);
+  operandL = load(node->lhs->ty, targetAddr);
   operandR = gen_expr(node->rhs);
 
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
-  llvm::Value *targetAdd = find_var(node->lhs->var);
-
-  genStore(sum, targetAdd);
+  genStore(sum, targetAddr);
   return sum;
 }
 
