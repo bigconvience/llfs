@@ -181,6 +181,9 @@ static Type *get_common_type(Type *ty1, Type *ty2) {
 static void usual_arith_conv(Node **lhs, Node **rhs) {
   Type *ty = get_common_type((*lhs)->ty, (*rhs)->ty);
   *lhs = new_cast(*lhs, ty);
+  if ((*rhs)->is_offset) {
+    ty = ty_long;
+  }
   *rhs = new_cast(*rhs, ty);
 }
 
@@ -324,11 +327,12 @@ void add_type(Node *node) {
     return;
   case ND_POST_INC:
   case ND_POST_DEC:
-    node->ty = node->lhs->ty;
-    return;
   case ND_PREFIX_INC:
   case ND_PREFIX_DEC:
     node->ty = node->lhs->ty;
+    if (node->rhs->is_offset) {
+      node->rhs = new_cast(node->rhs, ty_long);
+    }
     return;
   }
 }

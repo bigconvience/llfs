@@ -34,12 +34,167 @@ static llvm::Value *gen_addr(Node *node);
 static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset);
 static llvm::Value *gen_member(Node *node);
 static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
+static llvm::Value *gen_not(Node *node);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
 static std::map<Type *, llvm::StructType*> tagToType;
 static llvm::Value *gen_number(Node *node);
 
+enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
+
+static int getTypeId(Type *ty) {
+  switch (ty->kind) {
+  case TY_BOOL:
+    return B8;
+  case TY_CHAR:
+    return ty->is_unsigned ? U8 : I8;
+  case TY_SHORT:
+    return ty->is_unsigned ? U16 : I16;
+  case TY_INT:
+    return ty->is_unsigned ? U32 : I32;
+  case TY_LONG:
+    return ty->is_unsigned ? U64 : I64;
+  case TY_FLOAT:
+    return F32;
+  case TY_DOUBLE:
+    return F64;
+  case TY_LDOUBLE:
+    return F80;
+  case TY_PTR:
+    return PTR;
+  }
+  return I64;
+}
+
+// The table for type casts
+static llvm::Value *i64i8(llvm::Value *V, Type *to_type) 
+{
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateTrunc(V, targetTy);
+};
+
+static llvm::Value *i8i64(llvm::Value *V, Type *to_type) 
+{
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateSExt(V, targetTy);
+};
+
+static llvm::Value *u8i64(llvm::Value *V, Type *to_type) 
+{
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateZExt(V, targetTy);
+};
+
+static llvm::Value *ptrptr(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateBitCast(V, targetTy);
+}
+
+static llvm::Value *ptrint(llvm::Value *V, Type *to_type) {
+  return Builder->CreatePtrToInt(V, Builder->getInt64Ty());
+}
+
+static llvm::Value *intptr(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateIntToPtr(V, targetTy);
+}
+
+// float to BOOL
+static llvm::Value *f64b8(llvm::Value *V, Type *to_type) {
+  llvm::Value *Zero = llvm::Constant::getNullValue(V->getType());
+  llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::FCMP_UNE;
+  llvm::Value *cmp = Builder->CreateCmp(predicate, V, Zero);
+  return Builder->CreateZExt(cmp, Builder->getInt8Ty());
+}
+
+// int to BOOL
+static llvm::Value *i64b8(llvm::Value *V, Type *to_type) {
+  llvm::Value *Zero = llvm::Constant::getNullValue(V->getType());
+  llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::ICMP_NE;
+  llvm::Value *cmp = Builder->CreateCmp(predicate, V, Zero);
+  return Builder->CreateZExt(cmp, Builder->getInt8Ty());
+}
+
+// BOOL to float
+static llvm::Value *b8f64(llvm::Value *V, Type *to_type) {
+  return V;
+}
+
+
+// BOOL to int
+static llvm::Value *b8i64(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateZExt(V, targetTy);
+}
+
+
+static llvm::Value *(*cast_table[][13])(llvm::Value *, Type *) = {
+  // b8    i8   i16     i32   i64     u8   u16     u32    u64, f32    f64   f80    ptr
+  {NULL, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, NULL, NULL, intptr}, // b8
+
+  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, NULL, NULL, NULL, intptr}, // i8
+  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, NULL, NULL, NULL, intptr}, // i16
+  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, NULL, NULL, NULL, intptr}, // i32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // i64
+
+  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u8
+  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u16
+  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u64
+
+  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, NULL, NULL}, // f32
+  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, NULL, NULL}, // f64
+  {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, NULL, NULL}, // f80
+
+  {NULL,  ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, NULL, NULL, NULL, ptrptr}, // ptr
+};
+
+enum { LT, LE, EQ, NE };
+enum { UNSIGNED, SIGNED};
+enum { Int, Float };
+
+static int getRelationId(Node *node) {
+  switch(node->kind) {
+  case ND_LT:
+    return LT;
+  case ND_LE:
+    return LE;
+  case ND_EQ:
+    return EQ;
+  case ND_NE:
+    return NE;
+  }
+  return LT;
+}
+
+static int getTypeCatagory(Type *ty) {
+  return is_flonum(ty) ? Float : Int;
+}
+
+static int getSignId(Type *ty) {
+  return ty->is_unsigned ? UNSIGNED : SIGNED;
+}
+
+// [Relation][Signed][Integer]
+static llvm::CmpInst::Predicate predicate_table[][2][2] = {
+  {
+    {llvm::CmpInst::Predicate::ICMP_ULT, llvm::CmpInst::Predicate::FCMP_OLT}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SLT, llvm::CmpInst::Predicate::FCMP_OLT}, // Signed
+  }, // LT
+  {
+    {llvm::CmpInst::Predicate::ICMP_ULE, llvm::CmpInst::Predicate::FCMP_OLE}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SLE, llvm::CmpInst::Predicate::FCMP_OLE}, // Signed
+  }, // LE
+  {
+    {llvm::CmpInst::Predicate::ICMP_EQ, llvm::CmpInst::Predicate::FCMP_OEQ}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_EQ, llvm::CmpInst::Predicate::FCMP_OEQ}, // Signed
+  }, // EQ
+  {
+    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_ONE}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_ONE}, // Signed
+  }, // NE
+};
 
 static int get_align(Obj *var) {
   int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
@@ -188,8 +343,16 @@ public:
   llvm::LLVMContext &getLLVMContext() { return VMContext; }
   llvm::Module &getModule() { return TheModule; }
 
+  llvm::Type *getX86_FP80Ty() {
+    return llvm::Type::getX86_FP80Ty(VMContext);
+  }
 };
-static IRGenModule &CGM();
+
+static std::unique_ptr<IRGenModule> ModuleBuilder;
+
+static IRGenModule &CGM() {
+  return *ModuleBuilder;
+}
 
 static llvm::Value *gen_expr(Node *node);
 static void gen_stmt(Node *node);
@@ -384,6 +547,7 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   std::string toTypeStr = ctypeKindString(toKind);
   output << buildSeperator(stmt_level, "cast: ")
         << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
+  
   bool sameTypeKind = fromKind == toKind 
                   || (fromKind == TY_ARRAY && toKind == TY_PTR);
 
@@ -404,6 +568,13 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
 
   llvm::Type *targetTy = yuc2LLVMType(to);
   llvm::Value *target = Base;
+
+  int t1 = getTypeId(from);
+  int t2 = getTypeId(to);
+  if (cast_table[t1][t2]) {
+    return cast_table[t1][t2](Base, to);
+  }
+
   if (fromKind == TY_ARRAY && toKind == TY_PTR) {
     llvm::SmallVector<llvm::Constant*, 8> IndexValues;
     llvm::Constant *ZERO = llvm::ConstantInt::get(Builder->getInt64Ty(), 0);
@@ -414,28 +585,14 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
       llvm::Type *BaseValueTy = yuc2LLVMType(from);
       target = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, array, IndexValues);
     }
-  } else if ((fromKind == TY_CHAR || fromKind == TY_SHORT)
-      && toKind == TY_INT ) {
-    if (to->is_unsigned) {
-      target = Builder->CreateZExt(Base, targetTy);
-    } else {
-      target = Builder->CreateSExt(Base, targetTy);
-    }
-  } else if (fromKind == TY_LONG && toKind == TY_INT) {
-    target = Builder->CreateTrunc(Base, targetTy);
-  } else if (fromKind == TY_INT && toKind == TY_CHAR) {
-    target = Builder->CreateTrunc(Base, targetTy);
   } else if (fromKind == TY_BOOL && toKind == TY_INT) {
     target = Builder->CreateZExt(Base, targetTy);
   } else if (fromKind == TY_INT && toKind == TY_BOOL) {
     target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
-  } else if (fromKind == TY_PTR && toKind == TY_PTR) {
-    target = Builder->CreateBitCast(Base, targetTy);
-  } else if (fromKind == TY_PTR && toKind == TY_LONG) {
-    target = gen_get_addr(Base);
   } else {
     target = Builder->CreateBitCast(Base, targetTy);
   }
+
   return target;
 }
 
@@ -461,20 +618,20 @@ static llvm::Value *gen_cast(Node *node) {
   std::string fromTypeStr = ctypeKindString(fromType->kind);
   Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
-  output << buildSeperator(cur_level, "gen_cast start")
-        << " fromType: " << fromTypeStr
-        << " fromSize: " << toType->size  
-        << " toType: " << toTypeStr 
-        << " toSize: " << toType->size 
-        << " cast_reduced: " << node->cast_reduced
+  std::string log = buildSeperator(cur_level, "gen_cast start");
+  output << log
+        << " fromType:" << fromTypeStr
+        << " size:" << fromType->size 
+        << " unsigned:" << fromType->is_unsigned
+        << std::endl;
+  output << log
+        << " toType:" << toTypeStr 
+        << " size:" << toType->size
+        << " unsigned:" << toType->is_unsigned
         << std::endl;
   llvm::Value *V = nullptr;
-  if (node->cast_reduced) {
-    V = gen_number(node);
-  } else {
-    V = gen_expr(node->lhs);
-    V = cast(V, fromType, toType);
-  }
+  V = gen_expr(node->lhs);
+  V = cast(V, fromType, toType);
   --stmt_level;
   output << buildSeperator(cur_level, "gen_cast end") << std::endl;
   return V;
@@ -623,6 +780,11 @@ static llvm::Value *gen_prefix(Node *node, bool isInc) {
   return sum;
 }
 
+static llvm::Value *gen_not(Node *node) {
+  llvm::Value *operand;
+  operand = gen_expr(node->rhs);
+  return Builder->CreateNeg(operand);
+}
 
 static llvm::Value *gen_assign(Node *node) {
   llvm::Value *operandL, *operandR;
@@ -683,46 +845,22 @@ static llvm::Value *emit_call(Node *node) {
   return V;
 }
 
+static llvm::CmpInst::Predicate getPredicate(Node *node, Type *nodeType) {
+  llvm::CmpInst::Predicate predicate;
+  int relationId = getRelationId(node);
+  int signId = getSignId(nodeType);
+  int catagory = getTypeCatagory(nodeType);
+  predicate = predicate_table[relationId][signId][catagory];
+  return predicate;
+}
+
 static llvm::Value *gen_relational(Node *node) {
   output <<"gen_relational " << std::endl;
   llvm::Value *operandL, *operandR, *V;
-  NodeKind kind = node->kind;
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
-  llvm::CmpInst::Predicate predicate;
-  Type* nodeType = node->ty;
-  TypeKind typeKind = nodeType->kind;
-
-  if (kind == ND_LT) {
-    if (isFloatTypeKind(typeKind)) {
-      if (nodeType->is_unsigned) {
-        predicate = llvm::CmpInst::Predicate::FCMP_ULT;
-      } else {
-        predicate = llvm::CmpInst::Predicate::FCMP_OLT;
-      }
-    } else {
-      if (nodeType->is_unsigned) {
-        predicate = llvm::CmpInst::Predicate::ICMP_ULT;
-      } else {
-        predicate = llvm::CmpInst::Predicate::ICMP_SLT;
-      }
-    }
-  } else if (kind == ND_LE) {
-    if (isFloatTypeKind(typeKind)) {
-      if (nodeType->is_unsigned) {
-        predicate = llvm::CmpInst::Predicate::FCMP_ULE;
-      } else {
-        predicate = llvm::CmpInst::Predicate::FCMP_OLE;
-      }
-    } else {
-      if (nodeType->is_unsigned) {
-        predicate = llvm::CmpInst::Predicate::ICMP_ULE;
-      } else {
-        predicate = llvm::CmpInst::Predicate::ICMP_SLE;
-      }
-    }
-  }
-
+  llvm::CmpInst::Predicate predicate = getPredicate(node, node->lhs->ty);
+  output <<"predicate " << predicate << std::endl;
   V = Builder->CreateCmp(predicate, operandL, operandR);
   return V; 
 }
@@ -730,35 +868,10 @@ static llvm::Value *gen_relational(Node *node) {
 static llvm::Value *gen_equality(Node *node) {
   output <<"gen_equality " << std::endl;
   llvm::Value *operandL, *operandR, *V;
-  NodeKind kind = node->kind;
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
-  llvm::CmpInst::Predicate predicate;
-  Type* nodeType = node->ty;
-  TypeKind typeKind = nodeType->kind;
 
-  if (kind == ND_EQ) {
-    if (isFloatTypeKind(typeKind)) {
-      if (nodeType->is_unsigned) {
-        predicate = llvm::CmpInst::Predicate::FCMP_UEQ;
-      } else {
-        predicate = llvm::CmpInst::Predicate::FCMP_OEQ;
-      }
-    } else {
-      predicate = llvm::CmpInst::Predicate::ICMP_EQ;
-    }
-  } else if (kind == ND_NE) {
-    if (isFloatTypeKind(typeKind)) {
-      if (nodeType->is_unsigned) {
-        predicate = llvm::CmpInst::Predicate::FCMP_UNE;
-      } else {
-        predicate = llvm::CmpInst::Predicate::FCMP_ONE;
-      }
-    } else {
-      predicate = llvm::CmpInst::Predicate::ICMP_NE;
-    }
-  }
-
+  llvm::CmpInst::Predicate predicate = getPredicate(node, node->lhs->ty);
   V = Builder->CreateCmp(predicate, operandL, operandR);
   return V; 
 }
@@ -796,20 +909,20 @@ static llvm::Value *gen_shr(Node *node) {
 
 static llvm::Value *gen_number(Node *node) {
   Type *nodeType = node->ty;
-  uint64_t val = node->cast_reduced ? node->casted_val : node->val;
-  output << buildSeperator(stmt_level, "gen_number:") << val << std::endl; 
-  return llvm::ConstantInt::get(yuc2LLVMType(nodeType), val);
+  if (is_integer(nodeType)) {
+    uint64_t val = node->val;
+    output << buildSeperator(stmt_level, "gen_number int:") << val << std::endl; 
+    return llvm::ConstantInt::get(yuc2LLVMType(nodeType), val);
+  }
+  long double fval = node->fval;
+  output << buildSeperator(stmt_level, "gen_number double:") << fval << std::endl; 
+  return llvm::ConstantFP::get(yuc2LLVMType(nodeType), fval);
 }
 
 static llvm::Value *gen_neg(Node *node) {
   Node *target = node->lhs->lhs;
-  if (target->kind == ND_NUM) {
-    target->val = -target->val;
-    return gen_number(target);
-  }
   llvm::Value *targetV = gen_expr(target);
-  llvm::Value *left = llvm::ConstantInt::get(targetV->getType(), 0);
-  return Builder->CreateNUWSub(left, targetV);
+  return Builder->CreateNeg(targetV);
 }
 
 static llvm::Value *gen_expr(Node *node) {
@@ -841,6 +954,9 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_COND:
       output << buildSeperator(cur_level, "ND_COND:") << node->kind << std::endl;
+      break;
+    case ND_NOT:
+      V = gen_not(node);
       break;
     case ND_ASSIGN:
       V = gen_assign(node);
@@ -1127,7 +1243,7 @@ static llvm::Type *yuc2LLVMType(Type *ctype) {
   llvm::Type *type;
   switch (ctype->kind) {
     case TY_BOOL:
-      type = Builder->getInt1Ty();
+      type = Builder->getInt8Ty();
       break;
     case TY_CHAR:
       type = Builder->getInt8Ty();
@@ -1140,6 +1256,15 @@ static llvm::Type *yuc2LLVMType(Type *ctype) {
       break;
     case TY_LONG:
       type = Builder->getInt64Ty();
+      break;
+    case TY_FLOAT:
+      type = Builder->getFloatTy();
+      break;
+    case TY_DOUBLE:
+      type = Builder->getDoubleTy();
+      break;
+    case TY_LDOUBLE:
+      type = CGM().getX86_FP80Ty();
       break;
     case TY_PTR:
      	type = yuc2PointerType(ctype);
@@ -1204,12 +1329,6 @@ llvm::GlobalVariable *IRGenModule::GetAddrOfConstantCString(const std::string &S
                                   GlobalName, Alignment);
   strLiteralCache[Str] = GV;
   return GV;
-}
-
-static std::unique_ptr<IRGenModule> ModuleBuilder;
-
-static IRGenModule &CGM() {
-  return *ModuleBuilder;
 }
 
 static uint64_t read_buf(char *buf, int sz) {

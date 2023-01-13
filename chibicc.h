@@ -308,14 +308,13 @@ struct Node {
   // Numeric literal
   int64_t val;
   long double fval;
-
-  // reduce cast
-  bool cast_reduced;
-  uint64_t casted_val;
   
   // stmt expr;
   Node *last_expr;
   Obj *last_var;
+
+  // ptr + offset
+  bool is_offset;
 };
 
 Node *new_cast(Node *expr, Type *ty);
@@ -493,10 +492,6 @@ extern char *base_file;
 
 // generate llvm ir
 void gen_ir(Obj *prog, const std::string &file_name);
-
-static bool isFloatTypeKind(TypeKind kind) {
-  return kind == TY_FLOAT || kind == TY_DOUBLE;
-}
 
 static std::string ctypeKindString(TypeKind kind) {
   std::string kindStr;

@@ -159,7 +159,7 @@ static Token *parse_typedef(Token *tok, Type *basety);
 static bool is_function(Token *tok);
 static Token *function(Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(Token *tok, Type *basety, VarAttr *attr);
-
+static void add_o_kind(Node *node);
 static Node *new_prefix(Node *node, Token *tok, int addend);
 
 static int align_down(int n, int align) {
@@ -255,16 +255,6 @@ Node *new_cast(Node *expr, Type *ty) {
   node->tok = expr->tok;
   node->lhs = expr;
   node->ty = copy_type(ty);
-  if (expr->kind == ND_NUM) {
-    node->cast_reduced = true;
-    node->casted_val = eval(expr);
-    if (ty->kind == TY_PTR) {
-      node->ty = ty_long;
-    }
-  } else {
-    node->cast_reduced = expr->cast_reduced;
-    node->casted_val = expr->casted_val;
-  }
   return node;
 }
 
@@ -2405,7 +2395,7 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
   // num + num
   if (is_numeric(lhs->ty) && is_numeric(rhs->ty)) {
     node = new_binary(ND_ADD, lhs, rhs, tok);
-    node->o_kind = NUM_NUM;
+    add_o_kind(node);
     return node;
   }
 
@@ -2423,14 +2413,15 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
   if (lhs->ty->base->kind == TY_VLA) {
     rhs = new_binary(ND_MUL, rhs, new_var_node(lhs->ty->base->vla_size, tok), tok);
     node = new_binary(ND_ADD, lhs, rhs, tok);
-    node->o_kind = VLA_NUM;
+    add_o_kind(node);
     return node;
   }
 
   // ptr + num
   // rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
   node = new_binary(ND_ADD, lhs, rhs, tok);
-  node->o_kind = PTR_NUM;
+  rhs->is_offset = true;
+  add_o_kind(node);
   return node;
 }
 
