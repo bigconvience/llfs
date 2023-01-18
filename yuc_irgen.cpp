@@ -902,6 +902,18 @@ static llvm::Value *gen_bitand(Node *node) {
   return Builder->CreateAnd(operandL, operandR);
 }
 
+static llvm::Value *gen_bitor(Node *node) {
+  llvm::Value *operandL = gen_expr(node->lhs);
+  llvm::Value *operandR = gen_expr(node->rhs);
+  return Builder->CreateOr(operandL, operandR);
+}
+
+static llvm::Value *gen_bitxor(Node *node) {
+  llvm::Value *operandL = gen_expr(node->lhs);
+  llvm::Value *operandR = gen_expr(node->rhs);
+  return Builder->CreateXor(operandL, operandR);
+}
+
 static llvm::Value *gen_shl(Node *node) {
   llvm::Value *operandL = gen_expr(node->lhs);
   llvm::Value *operandR = gen_expr(node->rhs);
@@ -1034,6 +1046,12 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_BITAND:
       V = gen_bitand(node);
+      break;
+    case ND_BITOR:
+      V = gen_bitor(node);
+      break;
+    case ND_BITXOR:
+      V = gen_bitxor(node);
       break;
     case ND_FUNCALL:
       V = emit_call(node);
