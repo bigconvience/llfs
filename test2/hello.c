@@ -2,10 +2,9 @@
 
 
 int main() {
-  ASSERT(5, ((long)17)%6);
-  ASSERT(2, ({ int i=10; i%=4; i; }));
-  ASSERT(2, ({ long i=10; i%=4; i; }));
-
+  ASSERT(1, 3&1);
+  ASSERT(3, 7&3);
+  ASSERT(10, -1&10);
   
   printf("OK\n");
   return 0;

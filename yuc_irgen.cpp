@@ -896,6 +896,12 @@ static llvm::Value *gen_mod(Node *node) {
   return V;
 }
 
+static llvm::Value *gen_bitand(Node *node) {
+  llvm::Value *operandL = gen_expr(node->lhs);
+  llvm::Value *operandR = gen_expr(node->rhs);
+  return Builder->CreateAnd(operandL, operandR);
+}
+
 static llvm::Value *gen_shl(Node *node) {
   llvm::Value *operandL = gen_expr(node->lhs);
   llvm::Value *operandR = gen_expr(node->rhs);
@@ -1025,6 +1031,9 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_MOD:
       V = gen_mod(node);
+      break;
+    case ND_BITAND:
+      V = gen_bitand(node);
       break;
     case ND_FUNCALL:
       V = emit_call(node);
