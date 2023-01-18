@@ -618,7 +618,7 @@ static llvm::Value *gen_cast(Node *node) {
   std::string fromTypeStr = ctypeKindString(fromType->kind);
   Type *toType = node->ty;
   std::string toTypeStr = ctypeKindString(toType->kind);
-  std::string log = buildSeperator(cur_level, "gen_cast start");
+  std::string log = buildSeperator(cur_level, "gen_cast");
   output << log
         << " fromType:" << fromTypeStr
         << " size:" << fromType->size 
@@ -782,8 +782,16 @@ static llvm::Value *gen_prefix(Node *node, bool isInc) {
 
 static llvm::Value *gen_not(Node *node) {
   llvm::Value *operand;
-  operand = gen_expr(node->rhs);
-  return Builder->CreateNeg(operand);
+  operand = gen_expr(node->lhs);
+  operand = Builder->CreateIsNotNull(operand);
+  operand = Builder->CreateNot(operand);
+  return Builder->CreateZExt(operand, Builder->getInt32Ty());
+}
+
+static llvm::Value *gen_bitnot(Node *node) {
+  llvm::Value *operand;
+  operand = gen_expr(node->lhs);
+  return Builder->CreateXor(operand, -1);
 }
 
 static llvm::Value *gen_assign(Node *node) {
@@ -957,6 +965,9 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_NOT:
       V = gen_not(node);
+      break;
+    case ND_BITNOT:
+      V = gen_bitnot(node);
       break;
     case ND_ASSIGN:
       V = gen_assign(node);
