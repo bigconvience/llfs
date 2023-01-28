@@ -2,9 +2,7 @@
 
 
 int main() {
-  ASSERT(1, 3&1);
-  ASSERT(3, 7&3);
-  ASSERT(10, -1&10);
+  1 ? -2 : (void)-1;
   
   printf("OK\n");
   return 0;

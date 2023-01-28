@@ -30,11 +30,14 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode);
 static llvm::Type *yuc2LLVMType(Type *ctype);
 static llvm::Type *getTypeForArg(Type *ctype);
 static llvm::Constant *getOffset(long offset);
+static llvm::BasicBlock *createBasicBlock();
+
 static llvm::Value *gen_addr(Node *node);
 static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset);
 static llvm::Value *gen_member(Node *node);
 static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 static llvm::Value *gen_not(Node *node);
+static llvm::Value *gen_cond(Node *node);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -387,6 +390,11 @@ static std::string buildSeperator(int count, std::string target) {
   return result;
 }
 
+static llvm::BasicBlock *createBasicBlock() {
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  return llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction); 
+}
+
 static llvm::Value* load(Type *ty, llvm::Value *originValue) {
   llvm::Type *type = yuc2LLVMType(ty);
   return Builder->CreateLoad(type, originValue);
@@ -547,7 +555,9 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   std::string toTypeStr = ctypeKindString(toKind);
   output << buildSeperator(stmt_level, "cast: ")
         << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
-  
+  if (toKind == TY_VOID) {
+    return Base;
+  }
   bool sameTypeKind = fromKind == toKind 
                   || (fromKind == TY_ARRAY && toKind == TY_PTR);
 
@@ -780,6 +790,40 @@ static llvm::Value *gen_prefix(Node *node, bool isInc) {
   return sum;
 }
 
+static llvm::Value *gen_cond(Node *node) {
+  if (node->ty->kind == TY_VOID) {
+    return nullptr;
+  }
+  llvm::Value *condV, *thenV, *elseV;
+  // 0. gen condition
+  condV = gen_expr(node->cond);
+  condV = Builder->CreateIsNotNull(condV);
+ 
+  llvm::BasicBlock *ThenBB = createBasicBlock();
+  llvm::BasicBlock *ElseBB = createBasicBlock();
+  llvm::BasicBlock *MergeBB = createBasicBlock();
+
+  // 1. create branch
+  Builder->CreateCondBr(condV, ThenBB, ElseBB);
+  // 2. then expr
+  Builder->SetInsertPoint(ThenBB);
+  thenV = gen_expr(node->then);
+  Builder->CreateBr(MergeBB);
+  // 3. else expr
+  Builder->SetInsertPoint(ElseBB);
+  elseV = gen_expr(node->els);
+  Builder->CreateBr(MergeBB);
+  // 4. merge basic block
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Builder->SetInsertPoint(MergeBB);
+  // 5. create PHI
+  llvm::Type *type = yuc2LLVMType(node->ty);
+  llvm::PHINode *phiNode = Builder->CreatePHI(type, 2);
+  phiNode->addIncoming(thenV, ThenBB);
+  phiNode->addIncoming(elseV, ElseBB);
+  return phiNode;
+}
+
 static llvm::Value *gen_not(Node *node) {
   llvm::Value *operand;
   operand = gen_expr(node->lhs);
@@ -979,7 +1023,7 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_expr(node->rhs);
       break;
     case ND_COND:
-      output << buildSeperator(cur_level, "ND_COND:") << node->kind << std::endl;
+      V = gen_cond(node);
       break;
     case ND_NOT:
       V = gen_not(node);
