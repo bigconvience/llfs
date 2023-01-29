@@ -219,6 +219,7 @@ struct BlockScope {
 
   std::map<std::string, llvm::Value *> vars;
   std::map<std::string, llvm::StructType *> tags;
+  std::map<std::string, llvm::Value *> constants;
 };
 
 static BlockScope *scope = new BlockScope();
@@ -258,6 +259,22 @@ static llvm::Value *find_var(Obj *var) {
 static void push_var(Obj *var, llvm::Value *v) {
   std::string var_name = get_scope_name(var);
   scope->vars[var_name] = v;
+}
+
+static llvm::Value *find_constant(Obj *var) {
+  std::string var_name = get_scope_name(var);
+  for (BlockScope *sc = scope; sc; sc = sc->next) {
+    llvm::Value *v = sc->constants[var_name];
+    if (v) {
+      return v;
+    }
+  }
+  return nullptr;
+}
+
+static void push_constant(Obj *var, llvm::Value *v) {
+  std::string var_name = get_scope_name(var);
+  scope->constants[var_name] = v;
 }
 
 static llvm::StructType *find_tag(Token *tag) {
@@ -404,11 +421,16 @@ static llvm::Value* load(Type *ty, llvm::Value *originValue) {
 static llvm::Value *gen_rvalue(Node *node) {
   int cur_level = ++stmt_level;
   NodeKind kind = node->kind;
-  std::string kindStr = node_kind_info(kind);
-  output << buildSeperator(cur_level, "gen_rvalue start:" + kindStr) << std::endl;
   Obj *var = node->var;
-  llvm::Value *Addr = gen_addr(node);
+  std::string kindStr = node_kind_info(kind);
+  output << buildSeperator(cur_level, "gen_rvalue start:" + kindStr) 
+      << " is_const_expr: " << is_const_expr(node) << std::endl;
   llvm::Value *V = nullptr;
+  if (is_const_expr(node)) {
+    V = find_constant(var);
+    return V;
+  }
+  llvm::Value *Addr = gen_addr(node);
   if (node->ty->kind == TY_ARRAY) {
     // r_value(arr) =  GEP(array, 0, 0);
     V = gen_get_ptr(node, Addr, getOffset(0));
@@ -659,15 +681,13 @@ static llvm::Value *gen_stmt_expr(Node *node) {
   llvm::Value *V = nullptr;
   int cur_level = ++stmt_level;
   output << buildSeperator(cur_level, "gen_stmt_expr start") << std::endl;
-  for (Node *n = node->body; n && n->next; n = n->next) {
+  for (Node *n = node->body; n; n = n->next) {
     gen_stmt(n);
   }
   Node *last = node->last_expr;
-  if (last && last->kind == ND_EXPR_STMT) {
-    llvm::Value *lastV = gen_expr(last->lhs);
+  if (last) {
     Obj *lastVar = node->last_var;
     llvm::Value *lastAddr = find_var(lastVar);
-    genStore(lastV, lastAddr);
     V = load(last->lhs->ty, lastAddr);
   }
   output << buildSeperator(cur_level, "gen_stmt_expr end") << std::endl;
@@ -729,6 +749,13 @@ static llvm::Value *gen_sub(Node *node) {
     // ptr - ptr
     operandL = gen_get_addr(operandL);
     operandR = gen_get_addr(operandR);
+    V = Builder->CreateSub(operandL, operandR);
+    if (node->lhs->ty->base) {
+      int typeSize = node->lhs->ty->base->size;
+      llvm::Value *SizeV = getOffset(typeSize);
+      V = Builder->CreateExactSDiv(V, SizeV);
+    }
+    return V;
   } else if (node->o_kind == PTR_NUM) {
     // ptr - num
     operandR = Builder->CreateNeg(operandR);
@@ -798,6 +825,17 @@ static llvm::Value *gen_cond(Node *node) {
   // 0. gen condition
   condV = gen_expr(node->cond);
   condV = Builder->CreateIsNotNull(condV);
+
+  // both then and els is constant, use select
+  if (is_const_expr(node->then) 
+    && is_const_expr(node->els)) {
+    // fixme
+    Builder->CreateZExt(condV, Builder->getInt64Ty());
+
+    thenV = gen_expr(node->then);
+    elseV = gen_expr(node->els);
+    return Builder->CreateSelect(condV, thenV, elseV);
+  }
  
   llvm::BasicBlock *ThenBB = createBasicBlock();
   llvm::BasicBlock *ElseBB = createBasicBlock();
@@ -843,6 +881,12 @@ static llvm::Value *gen_assign(Node *node) {
   operandL = gen_addr(node->lhs);
   operandR = gen_expr(node->rhs);
   genStore(operandR, operandL);
+  Node *lhs = node->lhs;
+  output << buildSeperator(stmt_level, "gen assign start:") 
+      << " is_const_expr: " << is_const_expr(lhs) << std::endl;
+  if (is_const_expr(lhs)) {
+     push_constant(lhs->var, operandR);
+  }
   return operandR;
 }
 
@@ -914,7 +958,7 @@ static llvm::Value *gen_relational(Node *node) {
   llvm::CmpInst::Predicate predicate = getPredicate(node, node->lhs->ty);
   output <<"predicate " << predicate << std::endl;
   V = Builder->CreateCmp(predicate, operandL, operandR);
-  return V; 
+  return cast(V, ty_bool, ty_int);
 }
 
 static llvm::Value *gen_equality(Node *node) {
@@ -1168,11 +1212,15 @@ static void gen_return(Node *node) {
   }
 }
 
-static void gen_compound_stmt(Node *node) {
-  enter_scope();
+static void gen_block(Node *node) {
   for (Node *n = node->body; n; n = n->next) {
     gen_stmt(n);
   }
+}
+
+static void gen_compound_stmt(Node *node) {
+  enter_scope();
+  gen_block(node);
   leave_scope();
 }
 
@@ -1190,7 +1238,7 @@ static void gen_stmt(Node *node) {
       gen_if(node);
       break;
     case ND_BLOCK: // 32
-      gen_compound_stmt(node);
+      gen_block(node);
       break;
     case ND_COMPOUND_STMT:
       gen_compound_stmt(node);
@@ -1899,13 +1947,14 @@ static void define_func(Obj *funcNode) {
     output << "buildFunction: declaration" << std::endl;
     return;
   }
-  output << "buildFunction: definition" << std::endl;
+  output << "buildFunction: start\n";
   enter_scope();
   StartFunction(fooFunc, funcNode);
   buildFunctionBody(fooFunc, funcNode);
   FinishFunction(fooFunc, funcNode);
   leave_scope();
   llvm::verifyFunction(*fooFunc);
+  output << "buildFunction: end\n";
 }
 
 static void emit_function(Obj *fn) {

@@ -164,6 +164,9 @@ struct Obj {
   bool is_live;
   bool is_root;
   StringArray refs;
+
+  // constant data;
+  bool is_constant_var;
 };
 
 // Global variable can be initialized either by a constant expression
@@ -350,6 +353,7 @@ struct Type {
   int align;          // alignment
   bool is_unsigned;   // unsigned or signed
   bool is_atomic;     // true if _Atomic
+  bool is_const;      // true if const-qualified
   Type *origin;       // for type compatibility check
 
   // Pointer-to or array-of type. We intentionally use the same member
@@ -436,6 +440,7 @@ Type *vla_of(Type *base, Node *expr);
 Type *enum_type(void);
 Type *struct_type(void);
 void add_type(Node *node);
+bool is_const_expr(Node *node);
 
 //
 // codegen.c

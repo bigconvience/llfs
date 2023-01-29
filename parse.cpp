@@ -131,7 +131,7 @@ static Node *expr(Token **rest, Token *tok);
 static int64_t eval(Node *node);
 static int64_t eval2(Node *node, char ***label);
 static int64_t eval_rval(Node *node, char ***label);
-static bool is_const_expr(Node *node);
+bool is_const_expr(Node *node);
 static Node *assign(Token **rest, Token *tok);
 static Node *logor(Token **rest, Token *tok);
 static double eval_double(Node *node);
@@ -206,6 +206,9 @@ static Node *new_binary(NodeKind kind, Node *lhs, Node *rhs, Token *tok) {
   Node *node = new_node(kind, tok);
   node->lhs = lhs;
   node->rhs = rhs;
+  if (kind == ND_ASSIGN && lhs->kind == ND_VAR) {
+    lhs->var->is_constant_var = is_const_expr(rhs);
+  }
   return node;
 }
 
@@ -411,6 +414,7 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
   Type *ty = ty_int;
   int counter = 0;
   bool is_atomic = false;
+  bool is_const = false;
 
   while (is_typename(tok)) {
     // Handle storage class specifiers.
@@ -435,6 +439,10 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
         error_tok(tok, "typedef may not be used together with static,"
                   " extern, inline, __thread or _Thread_local");
       tok = tok->next;
+      continue;
+    }
+    if (consume(&tok, tok, "const")) {
+      is_const = true;
       continue;
     }
 
@@ -586,6 +594,10 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
     ty->is_atomic = true;
   }
 
+  if (is_const) {
+    ty = copy_type(ty);
+    ty->is_const = true;
+  }
   *rest = tok;
   return ty;
 }
@@ -1984,7 +1996,7 @@ static int64_t eval_rval(Node *node, char ***label) {
   error_tok(node->tok, "invalid initializer");
 }
 
-static bool is_const_expr(Node *node) {
+bool is_const_expr(Node *node) {
   add_type(node);
 
   switch (node->kind) {
@@ -2017,6 +2029,8 @@ static bool is_const_expr(Node *node) {
     return is_const_expr(node->lhs);
   case ND_NUM:
     return true;
+  case ND_VAR:
+    return node->ty->is_const && node->var->is_constant_var;
   }
 
   return false;
@@ -2450,10 +2464,9 @@ static Node *new_sub(Node *lhs, Node *rhs, Token *tok) {
 
   // ptr - num
   if (lhs->ty->base && is_integer(rhs->ty)) {
-    rhs = new_binary(ND_MUL, rhs, new_long(lhs->ty->base->size, tok), tok);
-    add_type(rhs);
     Node *node = new_binary(ND_SUB, lhs, rhs, tok);
     node->ty = lhs->ty;
+    node->rhs = new_cast(node->rhs, ty_long);
     node->o_kind = PTR_NUM;
     return node;
   }
@@ -3082,19 +3095,25 @@ static Node *generic_selection(Token **rest, Token *tok) {
   return ret;
 }
 
-static void get_last_stmt(Node *node) {
-  if (node == nullptr) {
+// last stmt int stmt-expr to assign
+// ({int x = 1; x + 2; }) => ({int x = 1; tmp = x + 2; })
+// tmp is the value of stmt-expr
+static void last_stmt_to_assign(Node *node, Token *tok) {
+  if (node == nullptr || node->body == nullptr) {
     return;
   }
   Node *cur = node->body;
   while(cur->next) {
     cur = cur->next;
   }
-  node->last_expr = nullptr;
-  if (cur->kind == ND_EXPR_STMT) {
-    node->last_expr = cur;
-    node->last_var = new_lvar(new_stmt_expr_name(), cur->lhs->ty);
-  }
+
+  Node *last = cur;
+  Obj *last_var = new_lvar(new_stmt_expr_name(), last->lhs->ty);
+  Node *assign = new_binary(ND_ASSIGN, new_var_node(last_var, tok), last->lhs, tok);
+  last->lhs = assign;
+
+  node->last_expr = assign;
+  node->last_var = last_var;
 }
 
 // primary = "(" "{" stmt+ "}" ")"
@@ -3116,7 +3135,7 @@ static Node *primary(Token **rest, Token *tok) {
     // This is a GNU statement expresssion.
     Node *node = new_node(ND_STMT_EXPR, tok);
     node->body = compound_stmt(&tok, tok->next->next)->body;
-    get_last_stmt(node);
+    last_stmt_to_assign(node, tok);
     *rest = skip(tok, ")");
     return node;
   }
