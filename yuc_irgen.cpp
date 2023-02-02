@@ -89,6 +89,30 @@ static llvm::Value *u8i64(llvm::Value *V, Type *to_type)
   return Builder->CreateZExt(V, targetTy);
 };
 
+// signed int to double long
+static llvm::Value *i8f80(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateSIToFP(V, targetTy);
+};
+
+// unsigned int to double long
+static llvm::Value *u8f80(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateUIToFP(V, targetTy);
+};
+
+// double long to signed int
+static llvm::Value *f80i8(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateFPToSI(V, targetTy);
+};
+
+// double long to unsigned int
+static llvm::Value *f80u8(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateFPToUI(V, targetTy);
+};
+
 static llvm::Value *ptrptr(llvm::Value *V, Type *to_type) {
   llvm::Type *targetTy = yuc2LLVMType(to_type);
   return Builder->CreateBitCast(V, targetTy);
@@ -124,31 +148,39 @@ static llvm::Value *b8f64(llvm::Value *V, Type *to_type) {
   return V;
 }
 
-
 // BOOL to int
 static llvm::Value *b8i64(llvm::Value *V, Type *to_type) {
   llvm::Type *targetTy = yuc2LLVMType(to_type);
   return Builder->CreateZExt(V, targetTy);
 }
 
+static llvm::Value *fpext(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateFPExt(V, targetTy);
+}
+
+static llvm::Value *fptrunc(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreateFPExt(V, targetTy);
+}
 
 static llvm::Value *(*cast_table[][13])(llvm::Value *, Type *) = {
   // b8    i8   i16     i32   i64     u8   u16     u32    u64, f32    f64   f80    ptr
-  {NULL, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, NULL, NULL, intptr}, // b8
+  {NULL, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, NULL, i8f80, intptr}, // b8
 
-  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, NULL, NULL, NULL, intptr}, // i8
-  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, NULL, NULL, NULL, intptr}, // i16
-  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, NULL, NULL, NULL, intptr}, // i32
-  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // i64
+  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, NULL, NULL, i8f80, intptr}, // i8
+  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, NULL, NULL, i8f80, intptr}, // i16
+  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, NULL, NULL, i8f80, intptr}, // i32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, i8f80, intptr}, // i64
 
-  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u8
-  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u16
-  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u32
-  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, NULL, intptr}, // u64
+  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u8
+  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u16
+  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u64
 
-  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, NULL, NULL}, // f32
-  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, NULL, NULL}, // f64
-  {NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, NULL, NULL}, // f80
+  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  fpext, fpext, NULL}, // f32
+  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, fpext, NULL}, // f64
+  {f80i8, f80i8, f80i8, f80i8, f80i8, f80u8, f80u8, f80u8, f80u8, fptrunc,  fptrunc, NULL, NULL}, // f80
 
   {NULL,  ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, NULL, NULL, NULL, ptrptr}, // ptr
 };
@@ -722,7 +754,14 @@ static llvm::Value *gen_add_2(Node *node,
     // ptr + num -> GEP(ptr, num)
     // arr + num -> GEP(arr, 0, num)
     V = gen_get_ptr(node->lhs, operandL, operandR);
-  } else if (node->ty->is_unsigned) {
+    return V;
+  }
+
+  if (is_flonum(node->ty)) {
+    return Builder->CreateFAdd(operandL, operandR);
+  }
+
+  if (node->ty->is_unsigned) {
     V = Builder->CreateNUWAdd(operandL, operandR);
   } else {
     V = Builder->CreateNSWAdd(operandL, operandR);
@@ -763,6 +802,10 @@ static llvm::Value *gen_sub(Node *node) {
     return V;
   }
 
+  if (is_flonum(node->ty)) {
+    return Builder->CreateFSub(operandL, operandR);
+  }
+
   if (node->ty->is_unsigned) {
     V = Builder->CreateNUWSub(operandL, operandR);
   } else {
@@ -775,6 +818,9 @@ static llvm::Value *gen_mul(Node *node) {
   llvm::Value *operandL, *operandR, *V;
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
+  if (is_flonum(node->ty)) {
+    return Builder->CreateFMul(operandL, operandR);
+  }
   if (node->ty->is_unsigned) {
     V = Builder->CreateNUWMul(operandL, operandR);
   } else {
@@ -969,7 +1015,7 @@ static llvm::Value *gen_equality(Node *node) {
 
   llvm::CmpInst::Predicate predicate = getPredicate(node, node->lhs->ty);
   V = Builder->CreateCmp(predicate, operandL, operandR);
-  return V; 
+  return cast(V, ty_bool, ty_int);
 }
 
 static llvm::Value *gen_mod(Node *node) {
@@ -1146,8 +1192,6 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_EQ:
     case ND_NE:
-      V = gen_equality(node);
-      break;
     case ND_LT:
     case ND_LE:
       V = gen_relational(node);
