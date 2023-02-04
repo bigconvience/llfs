@@ -537,6 +537,9 @@ static llvm::Value *gen_addr(Node *node) {
 
 llvm::Value *gen_deref(Node *node) {
   llvm::Value *V = gen_addr(node);
+  if (node->ty->kind == TY_ARRAY) {
+    return gen_get_ptr(node, V, getOffset(0));
+  }
   return load(node->ty, V);
 }
 
@@ -633,29 +636,33 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   llvm::Type *targetTy = yuc2LLVMType(to);
   llvm::Value *target = Base;
 
+  if (fromKind == TY_ARRAY && toKind == TY_PTR) {
+    return Builder->CreateBitCast(Base, targetTy);
+  }
+
   int t1 = getTypeId(from);
   int t2 = getTypeId(to);
   if (cast_table[t1][t2]) {
     return cast_table[t1][t2](Base, to);
   }
 
-  if (fromKind == TY_ARRAY && toKind == TY_PTR) {
-    llvm::SmallVector<llvm::Constant*, 8> IndexValues;
-    llvm::Constant *ZERO = llvm::ConstantInt::get(Builder->getInt64Ty(), 0);
-    IndexValues.push_back(ZERO);
-    IndexValues.push_back(ZERO);
+  // if (fromKind == TY_ARRAY && toKind == TY_PTR) {
+  //   llvm::SmallVector<llvm::Constant*, 8> IndexValues;
+  //   llvm::Constant *ZERO = llvm::ConstantInt::get(Builder->getInt64Ty(), 0);
+  //   IndexValues.push_back(ZERO);
+  //   IndexValues.push_back(ZERO);
 
-    if (auto *array = dyn_cast<llvm::Constant>(Base)) {
-      llvm::Type *BaseValueTy = yuc2LLVMType(from);
-      target = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, array, IndexValues);
-    }
-  } else if (fromKind == TY_BOOL && toKind == TY_INT) {
-    target = Builder->CreateZExt(Base, targetTy);
-  } else if (fromKind == TY_INT && toKind == TY_BOOL) {
-    target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
-  } else {
-    target = Builder->CreateBitCast(Base, targetTy);
-  }
+  //   if (auto *array = dyn_cast<llvm::Constant>(Base)) {
+  //     llvm::Type *BaseValueTy = yuc2LLVMType(from);
+  //     target = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, array, IndexValues);
+  //   }
+  // } else if (fromKind == TY_BOOL && toKind == TY_INT) {
+  //   target = Builder->CreateZExt(Base, targetTy);
+  // } else if (fromKind == TY_INT && toKind == TY_BOOL) {
+  //   target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
+  // } else {
+  //   target = Builder->CreateBitCast(Base, targetTy);
+  // }
 
   return target;
 }
