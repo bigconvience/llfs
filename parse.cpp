@@ -2015,6 +2015,7 @@ bool is_const_expr(Node *node) {
   case ND_LE:
   case ND_LOGAND:
   case ND_LOGOR:
+  case ND_MOD:
     return is_const_expr(node->lhs) && is_const_expr(node->rhs);
   case ND_COND:
     if (!is_const_expr(node->cond))

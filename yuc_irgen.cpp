@@ -119,12 +119,17 @@ static llvm::Value *ptrptr(llvm::Value *V, Type *to_type) {
 }
 
 static llvm::Value *ptrint(llvm::Value *V, Type *to_type) {
-  return Builder->CreatePtrToInt(V, Builder->getInt64Ty());
+  llvm::Type *targetTy = yuc2LLVMType(to_type);
+  return Builder->CreatePtrToInt(V, targetTy);
 }
 
 static llvm::Value *intptr(llvm::Value *V, Type *to_type) {
+  llvm::Value *ret = nullptr;
+  if (V->getType()->getIntegerBitWidth() < 64) {
+    ret = Builder->CreateZExt(V, Builder->getInt64Ty());
+  }
   llvm::Type *targetTy = yuc2LLVMType(to_type);
-  return Builder->CreateIntToPtr(V, targetTy);
+  return Builder->CreateIntToPtr(ret, targetTy);
 }
 
 // float to BOOL
@@ -166,17 +171,17 @@ static llvm::Value *fptrunc(llvm::Value *V, Type *to_type) {
 
 static llvm::Value *(*cast_table[][13])(llvm::Value *, Type *) = {
   // b8    i8   i16     i32   i64     u8   u16     u32    u64, f32    f64   f80    ptr
-  {NULL, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, NULL, i8f80, intptr}, // b8
+  {NULL, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, i8f80, i8f80, intptr}, // b8
 
-  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, NULL, NULL, i8f80, intptr}, // i8
-  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, NULL, NULL, i8f80, intptr}, // i16
-  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, NULL, NULL, i8f80, intptr}, // i32
-  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, i8f80, intptr}, // i64
+  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, NULL, i8f80, i8f80, intptr}, // i8
+  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, NULL, i8f80, i8f80, intptr}, // i16
+  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, NULL, i8f80, i8f80, intptr}, // i32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, i8f80, i8f80, intptr}, // i64
 
-  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u8
-  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u16
-  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u32
-  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, NULL, u8f80, intptr}, // u64
+  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u8
+  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u16
+  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u64
 
   {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  fpext, fpext, NULL}, // f32
   {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, fpext, NULL}, // f64
@@ -1420,7 +1425,7 @@ static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
 }
 
 static llvm::Type *yuc2LLVMType(Type *ctype) {
-  // output << "yuc2LLVMType: " << ctypeKindString(ctype->kind)  << std::endl;
+  output << "yuc2LLVMType: " << ctypeKindString(ctype->kind)  << std::endl;
   llvm::Type *type;
   switch (ctype->kind) {
     case TY_BOOL:
@@ -1686,10 +1691,44 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, Type *ctype, ch
 llvm::Constant *EmitIntegerInitialication(llvm::Type *destTy, Type *IntType, char *buf, int offset, Relocation *rel) {
   int size = IntType->size;
   if (!buf) {
-    return llvm::ConstantInt::get(destTy, 0);
+    return llvm::Constant::getNullValue(destTy);
   }
   if (!rel) {
     return llvm::ConstantInt::get(destTy, read_buf(buf + offset, size));
+  }
+  output << "label: " << *rel->label << std::endl;
+  char **label = rel->label;
+    char *name = *label;
+  llvm::GlobalVariable *global = TheModule->getGlobalVariable(name);
+  llvm::Constant *value = global->getInitializer();
+  return llvm::ConstantExpr::getPtrToInt(global, destTy);
+}
+
+llvm::Constant *EmitFloatInitialication(llvm::Type *destTy, Type *IntType, char *buf, int offset, Relocation *rel) {
+  int size = IntType->size;
+  if (!buf) {
+    return llvm::Constant::getNullValue(destTy);
+  }
+  if (!rel) {
+    float fVal = *(float *)(buf+offset);
+    return llvm::ConstantFP::get(CGM().getLLVMContext(), llvm::APFloat(fVal));
+  }
+  output << "label: " << *rel->label << std::endl;
+  char **label = rel->label;
+    char *name = *label;
+  llvm::GlobalVariable *global = TheModule->getGlobalVariable(name);
+  llvm::Constant *value = global->getInitializer();
+  return llvm::ConstantExpr::getPtrToInt(global, destTy);
+}
+
+llvm::Constant *EmitDoubleInitialication(llvm::Type *destTy, Type *IntType, char *buf, int offset, Relocation *rel) {
+  int size = IntType->size;
+  if (!buf) {
+    return llvm::Constant::getNullValue(destTy);
+  }
+  if (!rel) {
+    double dVal = *(double *)(buf+offset);
+    return llvm::ConstantFP::get(CGM().getLLVMContext(), llvm::APFloat(dVal));
   }
   output << "label: " << *rel->label << std::endl;
   char **label = rel->label;
@@ -1720,6 +1759,12 @@ static llvm::Constant *buffer2Constants(llvm::Type *varType, Type *ctype, Reloca
       break; 
     case TY_PTR:
       constant = EmitPointerInitialization(static_cast<llvm::PointerType *>(varType), ctype, buf, offset, rel);
+      break;
+    case TY_FLOAT:
+      constant = EmitFloatInitialication(varType, ctype, buf, offset, rel);
+      break;
+    case TY_DOUBLE:
+      constant = EmitDoubleInitialication(varType, ctype, buf, offset, rel);
       break;
     default:
       constant = Builder->getInt32(-1024);
@@ -1922,7 +1967,8 @@ static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
     output << "local name: " << varName
       << " align " << align
       << " offset " << local->offset << std::endl;
-    if (varName == "__alloca_size__" || varName == "__va_area__") {
+    if (varName == "__alloca_size__" 
+      || varName == "__va_area__") {
       continue;
     }
     llvm::Type *localType = getTypeForArg(ty);
