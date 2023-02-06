@@ -300,6 +300,7 @@ void add_type(Node *node) {
       Node *stmt = node->body;
       while (stmt->next)
         stmt = stmt->next;
+      //printf("stmt kind %d\n", stmt->kind);
       if (stmt->kind == ND_EXPR_STMT) {
         node->ty = stmt->lhs->ty;
         return;

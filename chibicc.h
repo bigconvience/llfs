@@ -212,7 +212,7 @@ typedef enum {
   ND_IF,        // "if"
   ND_FOR,       // "for" or "while"
   ND_DO,        // "do"
-  ND_SWITCH,    // "switch"
+  ND_SWITCH,    // "switch" 30
   ND_CASE,      // "case"
   ND_BLOCK,     // { ... }
   ND_GOTO,      // "goto"

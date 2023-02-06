@@ -124,12 +124,11 @@ static llvm::Value *ptrint(llvm::Value *V, Type *to_type) {
 }
 
 static llvm::Value *intptr(llvm::Value *V, Type *to_type) {
-  llvm::Value *ret = nullptr;
   if (V->getType()->getIntegerBitWidth() < 64) {
-    ret = Builder->CreateZExt(V, Builder->getInt64Ty());
+    V = Builder->CreateZExt(V, Builder->getInt64Ty());
   }
   llvm::Type *targetTy = yuc2LLVMType(to_type);
-  return Builder->CreateIntToPtr(ret, targetTy);
+  return Builder->CreateIntToPtr(V, targetTy);
 }
 
 // float to BOOL
@@ -171,7 +170,7 @@ static llvm::Value *fptrunc(llvm::Value *V, Type *to_type) {
 
 static llvm::Value *(*cast_table[][13])(llvm::Value *, Type *) = {
   // b8    i8   i16     i32   i64     u8   u16     u32    u64, f32    f64   f80    ptr
-  {NULL, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, i8f80, i8f80, intptr}, // b8
+  {u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, i8f80, i8f80, intptr}, // b8
 
   {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, NULL, i8f80, i8f80, intptr}, // i8
   {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, NULL, i8f80, i8f80, intptr}, // i16
@@ -451,17 +450,14 @@ static llvm::BasicBlock *createBasicBlock() {
 
 static llvm::Value* load(Type *ty, llvm::Value *originValue) {
   llvm::Type *type = yuc2LLVMType(ty);
-  return Builder->CreateLoad(type, originValue);
+  llvm::Value *V = Builder->CreateLoad(type, originValue);
+  if (ty->kind == TY_BOOL) {
+    V = Builder->CreateTrunc(V, Builder->getInt1Ty());
+  }
+  return V;
 }
 
-
-static llvm::Value *gen_rvalue(Node *node) {
-  int cur_level = ++stmt_level;
-  NodeKind kind = node->kind;
-  Obj *var = node->var;
-  std::string kindStr = node_kind_info(kind);
-  output << buildSeperator(cur_level, "gen_rvalue start:" + kindStr) 
-      << " is_const_expr: " << is_const_expr(node) << std::endl;
+static llvm::Value *gen_rvalue(Node *node, Obj *var) {
   llvm::Value *V = nullptr;
   if (is_const_expr(node)) {
     V = find_constant(var);
@@ -472,12 +468,20 @@ static llvm::Value *gen_rvalue(Node *node) {
     // r_value(arr) =  GEP(array, 0, 0);
     V = gen_get_ptr(node, Addr, getOffset(0));
   } else {
-    llvm::Type *type = getTypeForArg(var->ty);
-    V = Builder->CreateLoad(type, Addr);
-    if (var->ty->kind == TY_BOOL) {
-      V = Builder->CreateTrunc(Addr, Builder->getInt1Ty());
-    }
+    Type *varTy = var->ty;
+    V = load(varTy, Addr);
   }
+  return V; 
+}
+
+static llvm::Value *gen_rvalue(Node *node) {
+  int cur_level = ++stmt_level;
+  NodeKind kind = node->kind;
+  Obj *var = node->var;
+  std::string kindStr = node_kind_info(kind);
+  output << buildSeperator(cur_level, "gen_rvalue start:" + kindStr) 
+      << " is_const_expr: " << is_const_expr(node) << std::endl;
+  llvm::Value *V = gen_rvalue(node, var);
   --stmt_level;
   output << buildSeperator(cur_level, "gen_rvalue end") << std::endl;
   return V;  
@@ -732,7 +736,8 @@ static llvm::Value *gen_stmt_expr(Node *node) {
   if (last) {
     Obj *lastVar = node->last_var;
     llvm::Value *lastAddr = find_var(lastVar);
-    V = load(last->lhs->ty, lastAddr);
+    Type *varTy = last->lhs->ty;
+    V = load(lastVar->ty, lastAddr);
   }
   output << buildSeperator(cur_level, "gen_stmt_expr end") << std::endl;
   --stmt_level;
@@ -1425,7 +1430,7 @@ static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
 }
 
 static llvm::Type *yuc2LLVMType(Type *ctype) {
-  output << "yuc2LLVMType: " << ctypeKindString(ctype->kind)  << std::endl;
+  //output << "yuc2LLVMType: " << ctypeKindString(ctype->kind)  << std::endl;
   llvm::Type *type;
   switch (ctype->kind) {
     case TY_BOOL:
