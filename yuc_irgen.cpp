@@ -71,6 +71,15 @@ static int getTypeId(Type *ty) {
 }
 
 // The table for type casts
+static llvm::Value *fpToBool(llvm::Value *V) {
+  llvm::Value *operand;
+  llvm::Value *Zero = llvm::Constant::getNullValue(V->getType());
+  llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::FCMP_UNE;
+  operand = Builder->CreateCmp(predicate, V, Zero);
+  return operand;
+}
+
+// The table for type casts
 static llvm::Value *i64i8(llvm::Value *V, Type *to_type) 
 {
   llvm::Type *targetTy = yuc2LLVMType(to_type);
@@ -133,9 +142,7 @@ static llvm::Value *intptr(llvm::Value *V, Type *to_type) {
 
 // float to BOOL
 static llvm::Value *f64b8(llvm::Value *V, Type *to_type) {
-  llvm::Value *Zero = llvm::Constant::getNullValue(V->getType());
-  llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::FCMP_UNE;
-  llvm::Value *cmp = Builder->CreateCmp(predicate, V, Zero);
+  llvm::Value *cmp = fpToBool(V);
   return Builder->CreateZExt(cmp, Builder->getInt8Ty());
 }
 
@@ -169,21 +176,21 @@ static llvm::Value *fptrunc(llvm::Value *V, Type *to_type) {
 }
 
 static llvm::Value *(*cast_table[][13])(llvm::Value *, Type *) = {
-  // b8    i8   i16     i32   i64     u8   u16     u32    u64, f32    f64   f80    ptr
-  {u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, NULL, i8f80, i8f80, intptr}, // b8
+  // b8    i8   i16     i32   i64     u8   u16     u32    u64,   f32    f64   f80    ptr
+  {u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, i8f80, i8f80, i8f80, intptr}, // b8
 
-  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, NULL, i8f80, i8f80, intptr}, // i8
-  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, NULL, i8f80, i8f80, intptr}, // i16
-  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, NULL, i8f80, i8f80, intptr}, // i32
-  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, i8f80, i8f80, intptr}, // i64
+  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, i8f80, i8f80, i8f80, intptr}, // i8
+  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, i8f80, i8f80, i8f80, intptr}, // i16
+  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, i8f80, i8f80, i8f80, intptr}, // i32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, i8f80, i8f80, i8f80, intptr}, // i64
 
-  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u8
-  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u16
-  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u32
-  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, NULL, u8f80, u8f80, intptr}, // u64
+  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u8
+  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u16
+  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u64
 
-  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  fpext, fpext, NULL}, // f32
-  {f64b8, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL,  NULL, fpext, NULL}, // f64
+  {f64b8, f80i8, f80i8, f80i8, f80i8, f80u8, f80u8, f80u8, f80u8, NULL,  fpext, fpext, NULL}, // f32
+  {f64b8, f80i8, f80i8, f80i8, f80i8, f80u8, f80u8, f80u8, f80u8, fptrunc,  NULL, fpext, NULL}, // f64
   {f80i8, f80i8, f80i8, f80i8, f80i8, f80u8, f80u8, f80u8, f80u8, fptrunc,  fptrunc, NULL, NULL}, // f80
 
   {NULL,  ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, NULL, NULL, NULL, ptrptr}, // ptr
@@ -230,8 +237,8 @@ static llvm::CmpInst::Predicate predicate_table[][2][2] = {
     {llvm::CmpInst::Predicate::ICMP_EQ, llvm::CmpInst::Predicate::FCMP_OEQ}, // Signed
   }, // EQ
   {
-    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_ONE}, // Unsigned
-    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_ONE}, // Signed
+    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_UNE}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_UNE}, // Signed
   }, // NE
 };
 
@@ -736,7 +743,6 @@ static llvm::Value *gen_stmt_expr(Node *node) {
   if (last) {
     Obj *lastVar = node->last_var;
     llvm::Value *lastAddr = find_var(lastVar);
-    Type *varTy = last->lhs->ty;
     V = load(lastVar->ty, lastAddr);
   }
   output << buildSeperator(cur_level, "gen_stmt_expr end") << std::endl;
@@ -850,6 +856,9 @@ static llvm::Value *gen_div(Node *node) {
   llvm::Value *operandL, *operandR, *V;
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
+  if (is_flonum(node->ty)) {
+    return Builder->CreateFDiv(operandL, operandR);
+  }
   if (node->ty->is_unsigned) {
     V = Builder->CreateUDiv(operandL, operandR);
   } else {
@@ -887,8 +896,11 @@ static llvm::Value *gen_cond(Node *node) {
   llvm::Value *condV, *thenV, *elseV;
   // 0. gen condition
   condV = gen_expr(node->cond);
-  condV = Builder->CreateIsNotNull(condV);
-
+  if (is_flonum(node->cond->ty)) {
+    condV = fpToBool(condV);
+  } else {
+    condV = Builder->CreateIsNotNull(condV);
+  }
   // both then and els is constant, use select
   if (is_const_expr(node->then) 
     && is_const_expr(node->els)) {
@@ -928,7 +940,11 @@ static llvm::Value *gen_cond(Node *node) {
 static llvm::Value *gen_not(Node *node) {
   llvm::Value *operand;
   operand = gen_expr(node->lhs);
-  operand = Builder->CreateIsNotNull(operand);
+  if (is_flonum(node->lhs->ty)) {
+    operand = fpToBool(operand);
+  } else {
+    operand = Builder->CreateIsNotNull(operand);
+  }
   operand = Builder->CreateNot(operand);
   return Builder->CreateZExt(operand, Builder->getInt32Ty());
 }
@@ -1099,6 +1115,9 @@ static llvm::Value *gen_number(Node *node) {
 static llvm::Value *gen_neg(Node *node) {
   Node *target = node->lhs->lhs;
   llvm::Value *targetV = gen_expr(target);
+  if (is_flonum(target->ty)) {
+    return Builder->CreateFNeg(targetV);
+  }
   return Builder->CreateNeg(targetV);
 }
 
