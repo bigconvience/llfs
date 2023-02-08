@@ -32,6 +32,8 @@ static llvm::Type *getTypeForArg(Type *ctype);
 static llvm::Constant *getOffset(long offset);
 static llvm::BasicBlock *createBasicBlock();
 
+static llvm::Value *gen_expr(Node *node);
+static void gen_stmt(Node *node);
 static llvm::Value *gen_addr(Node *node);
 static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset);
 static llvm::Value *gen_member(Node *node);
@@ -70,13 +72,25 @@ static int getTypeId(Type *ty) {
   return I64;
 }
 
-// The table for type casts
+// float to bool
 static llvm::Value *fpToBool(llvm::Value *V) {
   llvm::Value *operand;
   llvm::Value *Zero = llvm::Constant::getNullValue(V->getType());
   llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::FCMP_UNE;
   operand = Builder->CreateCmp(predicate, V, Zero);
   return operand;
+}
+
+
+// gen bool for float or int
+static llvm::Value *gen_to_bool(Node *node) {
+  llvm::Value *condV = gen_expr(node);
+  if (is_flonum(node->ty)) {
+    condV = fpToBool(condV);
+  } else {
+    condV = Builder->CreateIsNotNull(condV);
+  }
+  return condV;
 }
 
 // The table for type casts
@@ -417,8 +431,6 @@ static IRGenModule &CGM() {
   return *ModuleBuilder;
 }
 
-static llvm::Value *gen_expr(Node *node);
-static void gen_stmt(Node *node);
 
 static llvm::Value *retValue = nullptr;
 static llvm::Value *allocatedRetValue = nullptr;
@@ -895,12 +907,7 @@ static llvm::Value *gen_cond(Node *node) {
   }
   llvm::Value *condV, *thenV, *elseV;
   // 0. gen condition
-  condV = gen_expr(node->cond);
-  if (is_flonum(node->cond->ty)) {
-    condV = fpToBool(condV);
-  } else {
-    condV = Builder->CreateIsNotNull(condV);
-  }
+  condV = gen_to_bool(node->cond);
   // both then and els is constant, use select
   if (is_const_expr(node->then) 
     && is_const_expr(node->els)) {
@@ -939,12 +946,7 @@ static llvm::Value *gen_cond(Node *node) {
 
 static llvm::Value *gen_not(Node *node) {
   llvm::Value *operand;
-  operand = gen_expr(node->lhs);
-  if (is_flonum(node->lhs->ty)) {
-    operand = fpToBool(operand);
-  } else {
-    operand = Builder->CreateIsNotNull(operand);
-  }
+  operand = gen_to_bool(node->lhs);
   operand = Builder->CreateNot(operand);
   return Builder->CreateZExt(operand, Builder->getInt32Ty());
 }
@@ -1253,7 +1255,17 @@ static llvm::Value *gen_expr(Node *node) {
 static void gen_if(Node *node) {
   llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
   
-  llvm::Value *condValue = gen_expr(node->cond);
+  llvm::Value *condValue = gen_to_bool(node->cond);
+  // constant propogate
+  if (auto *constant = dyn_cast<llvm::Constant>(condValue)) {
+    if (constant->isZeroValue()) {
+      if (node->els) 
+        gen_stmt(node->els);
+    } else {
+      gen_stmt(node->then);
+    }
+    return;
+  }
   llvm::BasicBlock *ThenBB = llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction);
   llvm::BasicBlock *ElseBB = node->els ? llvm::BasicBlock::Create(CGM().getLLVMContext()) : nullptr;
   llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
