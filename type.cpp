@@ -237,7 +237,6 @@ void add_type(Node *node) {
   case ND_LT:
   case ND_LE:
     usual_arith_conv(&node->lhs, &node->rhs);
-    // for LLVM IR
     node->ty = ty_int;
     return;
   case ND_FUNCALL:

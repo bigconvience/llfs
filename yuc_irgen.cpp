@@ -1253,8 +1253,6 @@ static llvm::Value *gen_expr(Node *node) {
 }
 
 static void gen_if(Node *node) {
-  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
-  
   llvm::Value *condValue = gen_to_bool(node->cond);
   // constant propogate
   if (auto *constant = dyn_cast<llvm::Constant>(condValue)) {
@@ -1266,6 +1264,8 @@ static void gen_if(Node *node) {
     }
     return;
   }
+
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
   llvm::BasicBlock *ThenBB = llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction);
   llvm::BasicBlock *ElseBB = node->els ? llvm::BasicBlock::Create(CGM().getLLVMContext()) : nullptr;
   llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
@@ -1287,6 +1287,55 @@ static void gen_if(Node *node) {
     ElseBB = Builder->GetInsertBlock();
   }
 
+  // Emit merge block.
+  TheFunction->getBasicBlockList().push_back(MergeBB);
+  Builder->SetInsertPoint(MergeBB);
+}
+
+static void gen_for(Node *node) {
+  // step 1 gen init
+  if (node->init)
+    gen_stmt(node->init);
+
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  llvm::BasicBlock *CondBB = node->cond ? llvm::BasicBlock::Create(CGM().getLLVMContext()) : nullptr;
+  llvm::BasicBlock *ThenBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+  llvm::BasicBlock *IncBB = node->inc ? llvm::BasicBlock::Create(CGM().getLLVMContext()) : nullptr;
+  llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+
+  // step 2 jump to CondBB
+  if (CondBB) {    
+    Builder->CreateBr(CondBB);
+    TheFunction->getBasicBlockList().push_back(CondBB);
+    Builder->SetInsertPoint(CondBB);
+    llvm::Value *condValue = gen_expr(node->cond);
+    condValue = Builder->CreateTrunc(condValue, Builder->getInt1Ty());
+    CondBB = Builder->GetInsertBlock();
+  } else {
+    Builder->CreateBr(ThenBB);
+  }
+  
+  // step 3 gen loop body
+  TheFunction->getBasicBlockList().push_back(ThenBB);
+  Builder->SetInsertPoint(ThenBB);
+  gen_stmt(node->then);
+  ThenBB = Builder->GetInsertBlock();
+
+  // step 4 jump to inc
+  if (IncBB) {
+    Builder->CreateBr(IncBB);
+    TheFunction->getBasicBlockList().push_back(IncBB);
+    Builder->SetInsertPoint(IncBB);
+    gen_expr(node->inc);
+    IncBB = Builder->GetInsertBlock();
+  }
+  // step 5 jump back to cond or body
+  if (CondBB) {
+    Builder->CreateBr(CondBB);
+  } else {
+    Builder->CreateBr(ThenBB);
+  }
+  
   // Emit merge block.
   TheFunction->getBasicBlockList().push_back(MergeBB);
   Builder->SetInsertPoint(MergeBB);
@@ -1328,6 +1377,9 @@ static void gen_stmt(Node *node) {
   switch(kind) {
     case ND_IF:
       gen_if(node);
+      break;
+    case ND_FOR:
+      gen_for(node);
       break;
     case ND_BLOCK: // 32
       gen_block(node);

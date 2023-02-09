@@ -614,6 +614,8 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_RETURN";
     case ND_IF:
       return "ND_IF";
+    case ND_FOR:
+      return "ND_FOR";
     case ND_DO:
       return "ND_DO";
     case ND_SWITCH:
