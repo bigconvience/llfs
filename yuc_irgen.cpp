@@ -8,6 +8,7 @@
 #include "llvm/IR/Constants.h"
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
+#include "llvm/IR/Instruction.h"
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -20,6 +21,7 @@ static std::unique_ptr<llvm::Module> TheModule;
 static std::unique_ptr<llvm::IRBuilder<>> Builder;
 static std::map<std::string, char *> annonInitData;
 static std::map<std::string, llvm::GlobalVariable*> strLiteralCache;
+static std::map<std::string, llvm::BasicBlock*> sLabelBB;
 
 static int stmt_level = 0;
 static int stmt_count = 0;
@@ -40,6 +42,7 @@ static llvm::Value *gen_member(Node *node);
 static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 static llvm::Value *gen_not(Node *node);
 static llvm::Value *gen_cond(Node *node);
+static void gen_branch(llvm::BasicBlock *src, llvm::BasicBlock *target);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -315,6 +318,14 @@ static llvm::Value *find_var(Obj *var) {
     }
   }
   return nullptr;
+}
+
+static void push_basicblock(std::string label, llvm::BasicBlock *BB) {
+  sLabelBB[label] = BB;
+}
+
+static llvm::BasicBlock *find_basicblock(std::string label) {
+  return sLabelBB[label];
 }
 
 static void push_var(Obj *var, llvm::Value *v) {
@@ -1281,17 +1292,15 @@ static void gen_if(Node *node) {
   
   Builder->SetInsertPoint(ThenBB);
   gen_stmt(node->then);
-  Builder->CreateBr(MergeBB);
-  ThenBB = Builder->GetInsertBlock();
-
+  gen_branch(ThenBB, MergeBB);
   if (ElseBB) {
     // Emit else block.
     TheFunction->getBasicBlockList().push_back(ElseBB);
     Builder->SetInsertPoint(ElseBB);
     gen_stmt(node->els);
-    Builder->CreateBr(MergeBB);
+    gen_branch(ElseBB, MergeBB);
     // Codegen of 'Else' can change the current block, update ElseBB for the PHI.
-    ElseBB = Builder->GetInsertBlock();
+    // ElseBB = Builder->GetInsertBlock();
   }
 
   // Emit merge block.
@@ -1310,6 +1319,7 @@ static void gen_for(Node *node) {
   llvm::BasicBlock *IncBB = node->inc ? llvm::BasicBlock::Create(CGM().getLLVMContext()) : nullptr;
   llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
 
+  push_basicblock(node->brk_label, MergeBB);
   // step 2 jump to CondBB
   if (CondBB) {    
     Builder->CreateBr(CondBB);
@@ -1317,7 +1327,7 @@ static void gen_for(Node *node) {
     Builder->SetInsertPoint(CondBB);
     llvm::Value *condValue = gen_to_bool(node->cond);
     Builder->CreateCondBr(condValue, ThenBB, MergeBB);
-    CondBB = Builder->GetInsertBlock();
+    //CondBB = Builder->GetInsertBlock();
   } else {
     Builder->CreateBr(ThenBB);
   }
@@ -1326,21 +1336,25 @@ static void gen_for(Node *node) {
   TheFunction->getBasicBlockList().push_back(ThenBB);
   Builder->SetInsertPoint(ThenBB);
   gen_stmt(node->then);
-  ThenBB = Builder->GetInsertBlock();
+  gen_branch(ThenBB, MergeBB);
+  //ThenBB = Builder->GetInsertBlock();
 
   // step 4 jump to inc
   if (IncBB) {
+    gen_branch(ThenBB, IncBB);
     Builder->CreateBr(IncBB);
     TheFunction->getBasicBlockList().push_back(IncBB);
     Builder->SetInsertPoint(IncBB);
     gen_expr(node->inc);
-    IncBB = Builder->GetInsertBlock();
+    //IncBB = Builder->GetInsertBlock();
   }
+
+  llvm::BasicBlock *curBB = Builder->GetInsertBlock();
   // step 5 jump back to cond or body
   if (CondBB) {
-    Builder->CreateBr(CondBB);
+    gen_branch(curBB, CondBB);
   } else {
-    Builder->CreateBr(ThenBB);
+    gen_branch(curBB, ThenBB);
   }
   
   // Emit merge block.
@@ -1372,6 +1386,23 @@ static void gen_compound_stmt(Node *node) {
   leave_scope();
 }
 
+static void gen_goto(Node *node) {
+  llvm::BasicBlock *BB = find_basicblock(node->unique_label);
+  if (BB) {
+    Builder->CreateBr(BB); 
+  }
+}
+
+static void gen_branch(llvm::BasicBlock *src, llvm::BasicBlock *target) {
+  if (src == nullptr || target == nullptr) {
+    return;
+  }
+  llvm::Instruction* terminator = src->getTerminator();
+  if (!terminator) {
+    Builder->CreateBr(target);
+  }
+}
+
 static void gen_stmt(Node *node) {
   int cur_count = ++stmt_count;
   int level = ++stmt_level;
@@ -1390,6 +1421,10 @@ static void gen_stmt(Node *node) {
       break;
     case ND_BLOCK: // 32
       gen_block(node);
+      break;
+    case ND_GOTO:
+    case ND_GOTO_EXPR:
+      gen_goto(node);
       break;
     case ND_COMPOUND_STMT:
       gen_compound_stmt(node);
