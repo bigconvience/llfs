@@ -42,7 +42,7 @@ static llvm::Value *gen_member(Node *node);
 static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 static llvm::Value *gen_not(Node *node);
 static llvm::Value *gen_cond(Node *node);
-static void gen_branch(llvm::BasicBlock *src, llvm::BasicBlock *target);
+static void gen_branch(llvm::BasicBlock *target);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -963,6 +963,9 @@ static llvm::Value *gen_not(Node *node) {
   llvm::Value *operand;
   operand = gen_to_bool(node->lhs);
   operand = Builder->CreateNot(operand);
+  if (node->eval_as_bool) {
+    return operand;
+  }
   return Builder->CreateZExt(operand, Builder->getInt32Ty());
 }
 
@@ -1052,22 +1055,10 @@ static llvm::Value *gen_relational(Node *node) {
   operandL = gen_expr(node->lhs);
   operandR = gen_expr(node->rhs);
   llvm::CmpInst::Predicate predicate = getPredicate(node, node->lhs->ty);
-  output <<"predicate " << predicate << std::endl;
   V = Builder->CreateCmp(predicate, operandL, operandR);
   if (node->eval_as_bool) {
     return V;
   }
-  return cast(V, ty_bool, ty_int);
-}
-
-static llvm::Value *gen_equality(Node *node) {
-  output <<"gen_equality " << std::endl;
-  llvm::Value *operandL, *operandR, *V;
-  operandL = gen_expr(node->lhs);
-  operandR = gen_expr(node->rhs);
-
-  llvm::CmpInst::Predicate predicate = getPredicate(node, node->lhs->ty);
-  V = Builder->CreateCmp(predicate, operandL, operandR);
   return cast(V, ty_bool, ty_int);
 }
 
@@ -1292,13 +1283,13 @@ static void gen_if(Node *node) {
   
   Builder->SetInsertPoint(ThenBB);
   gen_stmt(node->then);
-  gen_branch(ThenBB, MergeBB);
+  gen_branch(MergeBB);
   if (ElseBB) {
     // Emit else block.
     TheFunction->getBasicBlockList().push_back(ElseBB);
     Builder->SetInsertPoint(ElseBB);
     gen_stmt(node->els);
-    gen_branch(ElseBB, MergeBB);
+    gen_branch(MergeBB);
     // Codegen of 'Else' can change the current block, update ElseBB for the PHI.
     // ElseBB = Builder->GetInsertBlock();
   }
@@ -1320,6 +1311,7 @@ static void gen_for(Node *node) {
   llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
 
   push_basicblock(node->brk_label, MergeBB);
+  push_basicblock(node->cont_label, IncBB ? IncBB : (CondBB ? CondBB : ThenBB));
   // step 2 jump to CondBB
   if (CondBB) {    
     Builder->CreateBr(CondBB);
@@ -1336,13 +1328,11 @@ static void gen_for(Node *node) {
   TheFunction->getBasicBlockList().push_back(ThenBB);
   Builder->SetInsertPoint(ThenBB);
   gen_stmt(node->then);
-  gen_branch(ThenBB, MergeBB);
   //ThenBB = Builder->GetInsertBlock();
 
   // step 4 jump to inc
   if (IncBB) {
-    gen_branch(ThenBB, IncBB);
-    Builder->CreateBr(IncBB);
+    gen_branch(IncBB);
     TheFunction->getBasicBlockList().push_back(IncBB);
     Builder->SetInsertPoint(IncBB);
     gen_expr(node->inc);
@@ -1352,9 +1342,9 @@ static void gen_for(Node *node) {
   llvm::BasicBlock *curBB = Builder->GetInsertBlock();
   // step 5 jump back to cond or body
   if (CondBB) {
-    gen_branch(curBB, CondBB);
+    gen_branch(CondBB);
   } else {
-    gen_branch(curBB, ThenBB);
+    gen_branch(ThenBB);
   }
   
   // Emit merge block.
@@ -1393,7 +1383,8 @@ static void gen_goto(Node *node) {
   }
 }
 
-static void gen_branch(llvm::BasicBlock *src, llvm::BasicBlock *target) {
+static void gen_branch(llvm::BasicBlock *target) {
+  llvm::BasicBlock *src = Builder->GetInsertBlock();
   if (src == nullptr || target == nullptr) {
     return;
   }
