@@ -2892,6 +2892,7 @@ static Node *new_inc_dec(Node *node, Token *tok, int addend) {
     inc_dec = new_unary(ND_POST_DEC, node, tok);
   }
   inc_dec->rhs = new_num(addend, tok);
+  inc_dec->rhs->fval = addend;
   //add_type(inc_dec);
   add_o_kind(inc_dec);
   return inc_dec;
@@ -2909,6 +2910,7 @@ static Node *new_prefix(Node *node, Token *tok, int addend) {
     inc_dec = new_unary(ND_PREFIX_DEC, node, tok);
   }
   inc_dec->rhs = new_num(addend, tok);
+  inc_dec->rhs->fval = addend;
   add_o_kind(inc_dec);
   // add_type(inc_dec);
   return inc_dec;

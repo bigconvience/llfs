@@ -72,6 +72,10 @@ static int getTypeId(Type *ty) {
   return I64;
 }
 
+static bool is_bool_value(llvm::Value *V) {
+  return V->getType() == Builder->getInt1Ty();
+}
+
 // float to bool
 static llvm::Value *fpToBool(llvm::Value *V) {
   llvm::Value *operand;
@@ -81,13 +85,13 @@ static llvm::Value *fpToBool(llvm::Value *V) {
   return operand;
 }
 
-
 // gen bool for float or int
 static llvm::Value *gen_to_bool(Node *node) {
   llvm::Value *condV = gen_expr(node);
+
   if (is_flonum(node->ty)) {
     condV = fpToBool(condV);
-  } else {
+  } else if (!is_bool_value(condV)) {
     condV = Builder->CreateIsNotNull(condV);
   }
   return condV;
@@ -1039,6 +1043,9 @@ static llvm::Value *gen_relational(Node *node) {
   llvm::CmpInst::Predicate predicate = getPredicate(node, node->lhs->ty);
   output <<"predicate " << predicate << std::endl;
   V = Builder->CreateCmp(predicate, operandL, operandR);
+  if (node->eval_as_bool) {
+    return V;
+  }
   return cast(V, ty_bool, ty_int);
 }
 
@@ -1308,8 +1315,8 @@ static void gen_for(Node *node) {
     Builder->CreateBr(CondBB);
     TheFunction->getBasicBlockList().push_back(CondBB);
     Builder->SetInsertPoint(CondBB);
-    llvm::Value *condValue = gen_expr(node->cond);
-    condValue = Builder->CreateTrunc(condValue, Builder->getInt1Ty());
+    llvm::Value *condValue = gen_to_bool(node->cond);
+    Builder->CreateCondBr(condValue, ThenBB, MergeBB);
     CondBB = Builder->GetInsertBlock();
   } else {
     Builder->CreateBr(ThenBB);

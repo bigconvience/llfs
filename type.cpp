@@ -194,6 +194,9 @@ void add_type(Node *node) {
   add_type(node->lhs);
   add_type(node->rhs);
   add_type(node->cond);
+  if (node->cond) {
+    node->cond->eval_as_bool = true;
+  }
   add_type(node->then);
   add_type(node->els);
   add_type(node->init);
@@ -333,6 +336,8 @@ void add_type(Node *node) {
     node->ty = node->lhs->ty;
     if (node->rhs->is_offset) {
       node->rhs = new_cast(node->rhs, ty_long);
+    } else {
+      node->rhs->ty = node->ty;
     }
     return;
   }

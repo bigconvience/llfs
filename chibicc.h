@@ -264,6 +264,9 @@ struct Node {
   Node *init;
   Node *inc;
 
+  // evaluated as int_1
+  bool eval_as_bool;
+
   // "break" and "continue" labels
   char *brk_label;
   char *cont_label;
