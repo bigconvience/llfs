@@ -250,7 +250,7 @@ void add_type(Node *node) {
   case ND_NOT:
   case ND_LOGOR:
   case ND_LOGAND:
-    node->ty = ty_int;
+    node->ty = ty_bool;
     return;
   case ND_BITNOT:
   case ND_SHL:

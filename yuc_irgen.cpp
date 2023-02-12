@@ -9,6 +9,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Instruction.h"
+
 #include <algorithm>
 #include <fstream>
 #include <iostream>
@@ -43,6 +44,7 @@ static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 static llvm::Value *gen_not(Node *node);
 static llvm::Value *gen_cond(Node *node);
 static void gen_branch(llvm::BasicBlock *target);
+static void gen_label(llvm::BasicBlock *target);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -700,25 +702,6 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   if (cast_table[t1][t2]) {
     return cast_table[t1][t2](Base, to);
   }
-
-  // if (fromKind == TY_ARRAY && toKind == TY_PTR) {
-  //   llvm::SmallVector<llvm::Constant*, 8> IndexValues;
-  //   llvm::Constant *ZERO = llvm::ConstantInt::get(Builder->getInt64Ty(), 0);
-  //   IndexValues.push_back(ZERO);
-  //   IndexValues.push_back(ZERO);
-
-  //   if (auto *array = dyn_cast<llvm::Constant>(Base)) {
-  //     llvm::Type *BaseValueTy = yuc2LLVMType(from);
-  //     target = llvm::ConstantExpr::getInBoundsGetElementPtr(BaseValueTy, array, IndexValues);
-  //   }
-  // } else if (fromKind == TY_BOOL && toKind == TY_INT) {
-  //   target = Builder->CreateZExt(Base, targetTy);
-  // } else if (fromKind == TY_INT && toKind == TY_BOOL) {
-  //   target = Builder->CreateCmp(llvm::CmpInst::ICMP_NE, Base, Builder->getInt32(0));
-  // } else {
-  //   target = Builder->CreateBitCast(Base, targetTy);
-  // }
-
   return target;
 }
 
@@ -971,6 +954,64 @@ static llvm::Value *gen_cond(Node *node) {
   return phiNode;
 }
 
+static llvm::Value *gen_logic_and(Node *node) {
+  llvm::Value *V = nullptr;
+   // step1 left operand
+  llvm::Value *operandL = gen_to_bool(node->lhs);
+  if (auto *constL = dyn_cast<llvm::Constant>(operandL)) {
+    // short circuit
+    if (constL->isNullValue()) {
+      return Builder->getFalse();
+    }
+    return gen_to_bool(node->rhs);
+  }
+  llvm::BasicBlock *leftBB = Builder->GetInsertBlock();
+  llvm::BasicBlock *rightBB = createBasicBlock();
+  llvm::BasicBlock *mergeBB = createBasicBlock();
+
+  Builder->CreateCondBr(operandL, rightBB, mergeBB);
+  // step2 right operand
+  gen_label(rightBB);
+  llvm::Value *operandR = gen_to_bool(node->rhs);
+  gen_branch(mergeBB);
+  // step3 merge
+  gen_label(mergeBB);
+  llvm::Type *type = Builder->getInt1Ty();
+  llvm::PHINode *phi = Builder->CreatePHI(type, 2);
+  phi->addIncoming(Builder->getFalse(), leftBB);
+  phi->addIncoming(operandR, rightBB);
+  return phi;
+}
+
+static llvm::Value *gen_logic_or(Node *node) {
+  llvm::Value *V = nullptr;
+  // step1 left operand
+  llvm::Value *operandL = gen_to_bool(node->lhs);
+  if (auto *constL = dyn_cast<llvm::Constant>(operandL)) {
+    // short circuit
+    if (constL->isOneValue()) {
+      return Builder->getTrue();
+    }
+    return gen_to_bool(node->rhs);
+  }
+  llvm::BasicBlock *leftBB = Builder->GetInsertBlock();
+  llvm::BasicBlock *rightBB = createBasicBlock();
+  llvm::BasicBlock *mergeBB = createBasicBlock();
+
+  Builder->CreateCondBr(operandL, mergeBB, rightBB);
+  // step2 right operand
+  gen_label(rightBB);
+  llvm::Value *operandR = gen_to_bool(node->rhs);
+  gen_branch(mergeBB);
+  // step3 merge
+  gen_label(mergeBB);
+  llvm::Type *type = Builder->getInt1Ty();
+  llvm::PHINode *phi = Builder->CreatePHI(type, 2);
+  phi->addIncoming(Builder->getTrue(), leftBB);
+  phi->addIncoming(operandR, rightBB);
+  return phi;
+}
+
 static llvm::Value *gen_not(Node *node) {
   llvm::Value *operand;
   operand = gen_to_bool(node->lhs);
@@ -1180,6 +1221,12 @@ static llvm::Value *gen_expr(Node *node) {
     case ND_BITNOT:
       V = gen_bitnot(node);
       break;
+    case ND_LOGAND:
+      V = gen_logic_and(node);
+      break;
+    case ND_LOGOR:
+      V = gen_logic_or(node);
+      break; 
     case ND_ASSIGN:
       V = gen_assign(node);
       break;
@@ -1442,6 +1489,15 @@ static void gen_branch(llvm::BasicBlock *target) {
   }
 }
 
+static void gen_label(llvm::BasicBlock *targetBB) {
+  llvm::BasicBlock *curBB = Builder->GetInsertBlock();
+  llvm::Function *TheFunction = curBB->getParent();
+  if (curBB != targetBB) {
+    TheFunction->getBasicBlockList().push_back(targetBB);
+    Builder->SetInsertPoint(targetBB);
+  }
+}
+
 static void gen_stmt(Node *node) {
   int cur_count = ++stmt_count;
   int level = ++stmt_level;
@@ -1510,7 +1566,7 @@ static llvm::Type *yuc2PointerType(Type *ctype) {
 }
 
 static int getMemberCount(Type *ctype) {
-   int memberCount = 0;
+  int memberCount = 0;
   for (Member *member = ctype->members; member; member = member->next) {
     memberCount++;
   }
