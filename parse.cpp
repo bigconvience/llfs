@@ -1927,6 +1927,14 @@ static int64_t eval2(Node *node, char ***label) {
     if (node->lhs->ty->is_unsigned)
       return (uint64_t)eval(node->lhs) <= eval(node->rhs);
     return eval(node->lhs) <= eval(node->rhs);
+  case ND_GT:
+    if (node->lhs->ty->is_unsigned)
+      return (uint64_t)eval(node->lhs) > eval(node->rhs);
+    return eval(node->lhs) > eval(node->rhs);
+  case ND_GE:
+    if (node->lhs->ty->is_unsigned)
+      return (uint64_t)eval(node->lhs) >= eval(node->rhs);
+    return eval(node->lhs) >= eval(node->rhs);
   case ND_COND:
     return eval(node->cond) ? eval2(node->then, label) : eval2(node->els, label);
   case ND_COMMA:
@@ -2013,6 +2021,8 @@ bool is_const_expr(Node *node) {
   case ND_NE:
   case ND_LT:
   case ND_LE:
+  case ND_GT:
+  case ND_GE:
   case ND_LOGAND:
   case ND_LOGOR:
   case ND_MOD:
@@ -2362,12 +2372,12 @@ static Node *relational(Token **rest, Token *tok) {
     }
 
     if (equal(tok, ">")) {
-      node = new_binary(ND_LT, shift(&tok, tok->next), node, start);
+      node = new_binary(ND_GT, node, shift(&tok, tok->next), start);
       continue;
     }
 
     if (equal(tok, ">=")) {
-      node = new_binary(ND_LE, shift(&tok, tok->next), node, start);
+      node = new_binary(ND_GE, node, shift(&tok, tok->next), start);
       continue;
     }
 

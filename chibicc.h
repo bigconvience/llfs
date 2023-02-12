@@ -198,6 +198,8 @@ typedef enum {
   ND_NE,        // !=
   ND_LT,        // <
   ND_LE,        // <=
+  ND_GT,        // >
+  ND_GE,        // >=
   ND_ASSIGN,    // = 16
   ND_COND,      // ?:
   ND_COMMA,     // ,

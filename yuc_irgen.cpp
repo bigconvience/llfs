@@ -217,7 +217,7 @@ static llvm::Value *(*cast_table[][13])(llvm::Value *, Type *) = {
   {NULL,  ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, NULL, NULL, NULL, ptrptr}, // ptr
 };
 
-enum { LT, LE, EQ, NE };
+enum { LT, LE, GT, GE, EQ, NE };
 enum { UNSIGNED, SIGNED};
 enum { Int, Float };
 
@@ -227,6 +227,10 @@ static int getRelationId(Node *node) {
     return LT;
   case ND_LE:
     return LE;
+  case ND_GT:
+    return GT;
+  case ND_GE:
+    return GE;
   case ND_EQ:
     return EQ;
   case ND_NE:
@@ -253,6 +257,14 @@ static llvm::CmpInst::Predicate predicate_table[][2][2] = {
     {llvm::CmpInst::Predicate::ICMP_ULE, llvm::CmpInst::Predicate::FCMP_OLE}, // Unsigned
     {llvm::CmpInst::Predicate::ICMP_SLE, llvm::CmpInst::Predicate::FCMP_OLE}, // Signed
   }, // LE
+  {
+    {llvm::CmpInst::Predicate::ICMP_UGT, llvm::CmpInst::Predicate::FCMP_OGT}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SGT, llvm::CmpInst::Predicate::FCMP_OGT}, // Signed
+  }, // GT
+  {
+    {llvm::CmpInst::Predicate::ICMP_UGE, llvm::CmpInst::Predicate::FCMP_OGE}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SGE, llvm::CmpInst::Predicate::FCMP_OGE}, // Signed
+  }, // GE
   {
     {llvm::CmpInst::Predicate::ICMP_EQ, llvm::CmpInst::Predicate::FCMP_OEQ}, // Unsigned
     {llvm::CmpInst::Predicate::ICMP_EQ, llvm::CmpInst::Predicate::FCMP_OEQ}, // Signed
@@ -1241,6 +1253,8 @@ static llvm::Value *gen_expr(Node *node) {
     case ND_NE:
     case ND_LT:
     case ND_LE:
+    case ND_GT:
+    case ND_GE:
       V = gen_relational(node);
       break;
     case ND_SHL:
@@ -1299,6 +1313,38 @@ static void gen_if(Node *node) {
   Builder->SetInsertPoint(MergeBB);
 }
 
+static void gen_do(Node *node) {
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  llvm::BasicBlock *ThenBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+  llvm::BasicBlock *CondBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+  llvm::BasicBlock *MergeBB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+
+  // label for break and continue
+  push_basicblock(node->brk_label, MergeBB);
+  push_basicblock(node->cont_label, CondBB);
+
+  // step 1 gen body
+  gen_branch(ThenBB);
+  TheFunction->getBasicBlockList().push_back(ThenBB);
+  Builder->SetInsertPoint(ThenBB);
+  gen_stmt(node->then);
+
+  // step 2 jump to cond
+  gen_branch(CondBB);
+  TheFunction->getBasicBlockList().push_back(CondBB);
+  Builder->SetInsertPoint(CondBB);
+  llvm::Value *condValue = gen_to_bool(node->cond);
+  Builder->CreateCondBr(condValue, ThenBB, MergeBB);
+
+  // Emit merge block.
+  TheFunction->getBasicBlockList().push_back(MergeBB);
+  Builder->SetInsertPoint(MergeBB);
+}
+
+static void gen_switch(Node *node) {
+
+}
+
 static void gen_for(Node *node) {
   // step 1 gen init
   if (node->init)
@@ -1319,7 +1365,6 @@ static void gen_for(Node *node) {
     Builder->SetInsertPoint(CondBB);
     llvm::Value *condValue = gen_to_bool(node->cond);
     Builder->CreateCondBr(condValue, ThenBB, MergeBB);
-    //CondBB = Builder->GetInsertBlock();
   } else {
     Builder->CreateBr(ThenBB);
   }
@@ -1367,6 +1412,9 @@ static void gen_return(Node *node) {
 static void gen_block(Node *node) {
   for (Node *n = node->body; n; n = n->next) {
     gen_stmt(n);
+    if (n->kind == ND_GOTO) {
+      break;
+    }
   }
 }
 
@@ -1410,7 +1458,13 @@ static void gen_stmt(Node *node) {
     case ND_FOR:
       gen_for(node);
       break;
-    case ND_BLOCK: // 32
+    case ND_DO:
+      gen_do(node);
+      break;
+    case ND_SWITCH:
+      gen_switch(node);
+      break;
+    case ND_BLOCK:
       gen_block(node);
       break;
     case ND_GOTO:
