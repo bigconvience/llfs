@@ -43,8 +43,10 @@ static llvm::Value *gen_member(Node *node);
 static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 static llvm::Value *gen_not(Node *node);
 static llvm::Value *gen_cond(Node *node);
+static void gen_label(Node *node);
+
 static void gen_branch(llvm::BasicBlock *target);
-static void gen_label(llvm::BasicBlock *target);
+static void gen_basicblock(llvm::BasicBlock *target);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -494,6 +496,15 @@ static std::string buildSeperator(int count, std::string target) {
 static llvm::BasicBlock *createBasicBlock() {
   llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
   return llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction); 
+}
+
+static llvm::BasicBlock *getBasicBlock(Node *node) {
+  llvm::BasicBlock *BB = find_basicblock(node->unique_label);
+  if (!BB) {
+    BB = llvm::BasicBlock::Create(CGM().getLLVMContext());
+    push_basicblock(node->unique_label, BB);
+  }
+  return BB;
 }
 
 static llvm::Value* load(Type *ty, llvm::Value *originValue) {
@@ -971,11 +982,11 @@ static llvm::Value *gen_logic_and(Node *node) {
 
   Builder->CreateCondBr(operandL, rightBB, mergeBB);
   // step2 right operand
-  gen_label(rightBB);
+  gen_basicblock(rightBB);
   llvm::Value *operandR = gen_to_bool(node->rhs);
   gen_branch(mergeBB);
   // step3 merge
-  gen_label(mergeBB);
+  gen_basicblock(mergeBB);
   llvm::Type *type = Builder->getInt1Ty();
   llvm::PHINode *phi = Builder->CreatePHI(type, 2);
   phi->addIncoming(Builder->getFalse(), leftBB);
@@ -1000,11 +1011,11 @@ static llvm::Value *gen_logic_or(Node *node) {
 
   Builder->CreateCondBr(operandL, mergeBB, rightBB);
   // step2 right operand
-  gen_label(rightBB);
+  gen_basicblock(rightBB);
   llvm::Value *operandR = gen_to_bool(node->rhs);
   gen_branch(mergeBB);
   // step3 merge
-  gen_label(mergeBB);
+  gen_basicblock(mergeBB);
   llvm::Type *type = Builder->getInt1Ty();
   llvm::PHINode *phi = Builder->CreatePHI(type, 2);
   phi->addIncoming(Builder->getTrue(), leftBB);
@@ -1457,11 +1468,14 @@ static void gen_return(Node *node) {
 }
 
 static void gen_block(Node *node) {
+  bool is_goto = false;
   for (Node *n = node->body; n; n = n->next) {
-    gen_stmt(n);
-    if (n->kind == ND_GOTO) {
-      break;
+    // last stmt is goto, current is not label, ingore next stmt
+    if (is_goto && !(n->kind == ND_LABEL)) {
+       break;
     }
+    gen_stmt(n);
+    is_goto = n->kind == ND_GOTO;
   }
 }
 
@@ -1472,10 +1486,8 @@ static void gen_compound_stmt(Node *node) {
 }
 
 static void gen_goto(Node *node) {
-  llvm::BasicBlock *BB = find_basicblock(node->unique_label);
-  if (BB) {
-    Builder->CreateBr(BB); 
-  }
+  llvm::BasicBlock *BB = getBasicBlock(node);
+  Builder->CreateBr(BB);
 }
 
 static void gen_branch(llvm::BasicBlock *target) {
@@ -1489,13 +1501,20 @@ static void gen_branch(llvm::BasicBlock *target) {
   }
 }
 
-static void gen_label(llvm::BasicBlock *targetBB) {
+static void gen_basicblock(llvm::BasicBlock *targetBB) {
   llvm::BasicBlock *curBB = Builder->GetInsertBlock();
   llvm::Function *TheFunction = curBB->getParent();
   if (curBB != targetBB) {
     TheFunction->getBasicBlockList().push_back(targetBB);
     Builder->SetInsertPoint(targetBB);
   }
+}
+
+static void gen_label(Node *node) {
+  llvm::BasicBlock *BB = getBasicBlock(node);
+  gen_branch(BB);
+  gen_basicblock(BB);
+  gen_stmt(node->lhs);
 }
 
 static void gen_stmt(Node *node) {
@@ -1526,6 +1545,9 @@ static void gen_stmt(Node *node) {
     case ND_GOTO:
     case ND_GOTO_EXPR:
       gen_goto(node);
+      break;
+    case ND_LABEL:
+      gen_label(node);
       break;
     case ND_COMPOUND_STMT:
       gen_compound_stmt(node);

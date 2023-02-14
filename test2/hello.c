@@ -24,14 +24,7 @@ int main() {
 
   // ASSERT(55, ({ int j=0; for (int i=0; i<=10; i=i+1) j=j+i; j; }));
   // ASSERT(3, ({ int i=3; int j=0; for (int i=0; i<=10; i=i+1) j=j+i; i; }));
-  ASSERT(1, 0||1);
-  ASSERT(1, 0||(2-2)||5);
-  ASSERT(0, 0||0);
-  ASSERT(0, 0||(2-2));
-
-  ASSERT(0, 0&&1);
-  ASSERT(0, (2-2)&&5);
-  ASSERT(1, 1&&5);
+  
  //  ASSERT(1, 0||1);
  //  ASSERT(1, 0||(2-2)||5);
  //  ASSERT(0, 0||0);
@@ -41,7 +34,7 @@ int main() {
  //  ASSERT(0, (2-2)&&5);
  //  ASSERT(1, 1&&5);
 
- //  ASSERT(3, ({ int i=0; goto a; a: i++; b: i++; c: i++; i; }));
+   ASSERT(3, ({ int i=0; goto a; a: i++; b: i++; c: i++; i; }));
  //  ASSERT(2, ({ int i=0; goto e; d: i++; e: i++; f: i++; i; }));
  //  ASSERT(1, ({ int i=0; goto i; g: i++; h: i++; i: i++; i; }));
 

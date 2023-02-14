@@ -11,3 +11,4 @@
 *.ll
 *.bc
 *.out
+.vscode
