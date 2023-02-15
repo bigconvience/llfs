@@ -1,97 +1,143 @@
 #include "test.h"
 
-
 int main() {
+  // ASSERT(0, 0);
+  // ASSERT(42, 42);
+  // ASSERT(21, 5+20-4);
+  // ASSERT(41,  12 + 34 - 5 );
+  // ASSERT(47, 5+6*7);
+  // ASSERT(15, 5*(9-6));
+  // ASSERT(4, (3+5)/2);
+  // ASSERT(10, -10+20);
+  // ASSERT(10, - -10);
+  // ASSERT(10, - - +10);
 
-//  ASSERT(3, ({ int x; if (0) x=2; else x=3; x; }));
-//   ASSERT(3, ({ int x; if (1-1) x=2; else x=3; x; }));
-//   ASSERT(2, ({ int x; if (1) x=2; else x=3; x; }));
-//   ASSERT(2, ({ int x; if (2-1) x=2; else x=3; x; }));
+  // ASSERT(0, 0==1);
+  // ASSERT(1, 42==42);
+  // ASSERT(1, 0!=1);
+  // ASSERT(0, 42!=42);
 
-//   ASSERT(55, ({ int i=0; int j=0; for (i=0; i<=10; i=i+1) j=i+j; j; }));
+  // ASSERT(1, 0<1);
+  // ASSERT(0, 1<1);
+  // ASSERT(0, 2<1);
+  // ASSERT(1, 0<=1);
+  // ASSERT(1, 1<=1);
+  // ASSERT(0, 2<=1);
 
-//   ASSERT(10, ({ int i=0; while(i<10) i=i+1; i; }));
+  // ASSERT(1, 1>0);
+  // ASSERT(0, 1>1);
+  // ASSERT(0, 1>2);
+  // ASSERT(1, 1>=0);
+  // ASSERT(1, 1>=1);
+  // ASSERT(0, 1>=2);
 
-  // ASSERT(3, ({ 1; {2;} 3; }));
-  // ASSERT(5, ({ ;;; 5; }));
+  // ASSERT(0, 1073741824 * 100 / 100);
 
-  // ASSERT(10, ({ int i=0; while(i<10) i=i+1; i; }));
-  // ASSERT(55, ({ int i=0; int j=0; while(i<=10) {j=i+j; i=i+1;} j; }));
+  // ASSERT(7, ({ int i=2; i+=5; i; }));
+  // ASSERT(7, ({ int i=2; i+=5; }));
+  // ASSERT(3, ({ int i=5; i-=2; i; }));
+  // ASSERT(3, ({ int i=5; i-=2; }));
+  // ASSERT(6, ({ int i=3; i*=2; i; }));
+  // ASSERT(6, ({ int i=3; i*=2; }));
+  // ASSERT(3, ({ int i=6; i/=2; i; }));
+  // ASSERT(3, ({ int i=6; i/=2; }));
 
-  //ASSERT(3, (1,2,3));
-  // ASSERT(5, ({ int i=2, j=3; (i=5,j=6); i; }));
-  // ASSERT(6, ({ int i=2, j=3; (i=5,j=6); j; }));
+  // ASSERT(3, ({ int i=2; ++i; }));
+  // ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; ++*p; }));
+  // ASSERT(0, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; --*p; }));
 
-  // ASSERT(55, ({ int j=0; for (int i=0; i<=10; i=i+1) j=j+i; j; }));
-  // ASSERT(3, ({ int i=3; int j=0; for (int i=0; i<=10; i=i+1) j=j+i; i; }));
-  
- //  ASSERT(1, 0||1);
- //  ASSERT(1, 0||(2-2)||5);
- //  ASSERT(0, 0||0);
- //  ASSERT(0, 0||(2-2));
+  // ASSERT(2, ({ int i=2; i++; }));
+  // ASSERT(2, ({ int i=2; i--; }));
+  // ASSERT(3, ({ int i=2; i++; i; }));
+  // ASSERT(1, ({ int i=2; i--; i; }));
+  // ASSERT(1, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; *p++; }));
+  //  ASSERT(1, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; *p--; }));
 
- //  ASSERT(0, 0&&1);
- //  ASSERT(0, (2-2)&&5);
- //  ASSERT(1, 1&&5);
+  // ASSERT(0, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*p++)--; a[0]; }));
+  // ASSERT(0, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*(p--))--; a[1]; }));
+  // ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*p)--; a[2]; }));
+  // ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*p)--; p++; *p; }));
 
-   ASSERT(3, ({ int i=0; goto a; a: i++; b: i++; c: i++; i; }));
- //  ASSERT(2, ({ int i=0; goto e; d: i++; e: i++; f: i++; i; }));
- //  ASSERT(1, ({ int i=0; goto i; g: i++; h: i++; i: i++; i; }));
+  // ASSERT(0, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*p++)--; a[0]; }));
+  // ASSERT(0, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*p++)--; a[1]; }));
+  // ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*p++)--; a[2]; }));
+  // ASSERT(2, ({ int a[3]; a[0]=0; a[1]=1; a[2]=2; int *p=a+1; (*p++)--; *p; }));
 
- //  ASSERT(1, ({ typedef int foo; goto foo; foo:; 1; }));
+  // ASSERT(0, !1);
+  // ASSERT(0, !2);
+  // ASSERT(1, !0);
+  ASSERT(1, !(char)0);
+  ASSERT(0, !(long)3);
+  ASSERT(4, sizeof(!(char)0));
+  ASSERT(4, sizeof(!(long)0));
 
- //  ASSERT(3, ({ int i=0; for(;i<10;i++) { if (i == 3) break; } i; }));
- //  ASSERT(4, ({ int i=0; while (1) { if (i++ == 3) break; } i; }));
- //  ASSERT(3, ({ int i=0; for(;i<10;i++) { for (;;) break; if (i == 3) break; } i; }));
- //  ASSERT(4, ({ int i=0; while (1) { while(1) break; if (i++ == 3) break; } i; }));
+  ASSERT(-1, ~0);
+  ASSERT(0, ~-1);
 
- //  ASSERT(10, ({ int i=0; int j=0; for (;i<10;i++) { if (i>5) continue; j++; } i; }));
- //  ASSERT(6, ({ int i=0; int j=0; for (;i<10;i++) { if (i>5) continue; j++; } j; }));
- //  ASSERT(10, ({ int i=0; int j=0; for(;!i;) { for (;j!=10;j++) continue; break; } j; }));
- //  ASSERT(11, ({ int i=0; int j=0; while (i++<10) { if (i>5) continue; j++; } i; }));
- //  ASSERT(5, ({ int i=0; int j=0; while (i++<10) { if (i>5) continue; j++; } j; }));
- //  ASSERT(11, ({ int i=0; int j=0; while(!i) { while (j++!=10) continue; break; } j; }));
+  ASSERT(5, 17%6);
+  ASSERT(5, ((long)17)%6);
+  ASSERT(2, ({ int i=10; i%=4; i; }));
+  ASSERT(2, ({ long i=10; i%=4; i; }));
 
- //  ASSERT(5, ({ int i=0; switch(0) { case 0:i=5;break; case 1:i=6;break; case 2:i=7;break; } i; }));
- //  ASSERT(6, ({ int i=0; switch(1) { case 0:i=5;break; case 1:i=6;break; case 2:i=7;break; } i; }));
- //  ASSERT(7, ({ int i=0; switch(2) { case 0:i=5;break; case 1:i=6;break; case 2:i=7;break; } i; }));
- //  ASSERT(0, ({ int i=0; switch(3) { case 0:i=5;break; case 1:i=6;break; case 2:i=7;break; } i; }));
- //  ASSERT(5, ({ int i=0; switch(0) { case 0:i=5;break; default:i=7; } i; }));
- //  ASSERT(7, ({ int i=0; switch(1) { case 0:i=5;break; default:i=7; } i; }));
- //  ASSERT(2, ({ int i=0; switch(1) { case 0: 0; case 1: 0; case 2: 0; i=2; } i; }));
- //  ASSERT(0, ({ int i=0; switch(3) { case 0: 0; case 1: 0; case 2: 0; i=2; } i; }));
+  ASSERT(0, 0&1);
+  ASSERT(1, 3&1);
+  ASSERT(3, 7&3);
+  ASSERT(10, -1&10);
 
- //  ASSERT(3, ({ int i=0; switch(-1) { case 0xffffffff: i=3; break; } i; }));
+  // ASSERT(1, 0|1);
+  // ASSERT(0b10011, 0b10000|0b00011);
 
-//   ASSERT(7, ({ int i=0; int j=0; do { j++; } while (i++ < 6); j; }));
-//   ASSERT(4, ({ int i=0; int j=0; int k=0; do { if (++j > 3) break; continue; k++; } while (1); j; }));
+  // ASSERT(0, 0^0);
+  // ASSERT(0, 0b1111^0b1111);
+  // ASSERT(0b110100, 0b111000^0b001100);
 
- //  ASSERT(0, 0.0 && 0.0);
- //  ASSERT(0, 0.0 && 0.1);
- //  ASSERT(0, 0.3 && 0.0);
- //  ASSERT(1, 0.3 && 0.5);
- //  ASSERT(0, 0.0 || 0.0);
- //  ASSERT(1, 0.0 || 0.1);
- //  ASSERT(1, 0.3 || 0.0);
- //  ASSERT(1, 0.3 || 0.5);
- //  ASSERT(5, ({ int x; if (0.0) x=3; else x=5; x; }));
- //  ASSERT(3, ({ int x; if (0.1) x=3; else x=5; x; }));
- //  ASSERT(5, ({ int x=5; if (0.0) x=3; x; }));
- //  ASSERT(3, ({ int x=5; if (0.1) x=3; x; }));
- //  ASSERT(10, ({ double i=10.0; int j=0; for (; i; i--, j++); j; }));
- //  ASSERT(10, ({ double i=10.0; int j=0; do j++; while(--i); j; }));
+  // ASSERT(2, ({ int i=6; i&=3; i; }));
+  // ASSERT(7, ({ int i=6; i|=3; i; }));
+  // ASSERT(10, ({ int i=15; i^=5; i; }));
 
- //  ASSERT(2, ({ int i=0; switch(7) { case 0 ... 5: i=1; break; case 6 ... 20: i=2; break; } i; }));
- //  ASSERT(1, ({ int i=0; switch(7) { case 0 ... 7: i=1; break; case 8 ... 10: i=2; break; } i; }));
- //  ASSERT(1, ({ int i=0; switch(7) { case 0: i=1; break; case 7 ... 7: i=1; break; } i; }));
+  // ASSERT(1, 1<<0);
+  // ASSERT(8, 1<<3);
+  // ASSERT(10, 5<<1);
+  // ASSERT(2, 5>>1);
+  // ASSERT(-1, -1>>1);
+  // ASSERT(1, ({ int i=1; i<<=0; i; }));
+  // ASSERT(8, ({ int i=1; i<<=3; i; }));
+  // ASSERT(10, ({ int i=5; i<<=1; i; }));
+  // ASSERT(2, ({ int i=5; i>>=1; i; }));
+  // ASSERT(-1, -1);
+  // ASSERT(-1, ({ int i=-1; i; }));
+  // ASSERT(-1, ({ int i=-1; i>>=1; i; }));
 
- //  ASSERT(3, ({ void *p = &&v11; int i=0; goto *p; v11:i++; v12:i++; v13:i++; i; }));
- //  ASSERT(2, ({ void *p = &&v22; int i=0; goto *p; v21:i++; v22:i++; v23:i++; i; }));
- //  ASSERT(1, ({ void *p = &&v33; int i=0; goto *p; v31:i++; v32:i++; v33:i++; i; }));
+  // ASSERT(2, 0?1:2);
+  // ASSERT(1, 1?1:2);
+  // ASSERT(-1, 0?-2:-1);
+  // ASSERT(-2, 1?-2:-1);
+  // ASSERT(4, sizeof(0?1:2));
+  // ASSERT(8, sizeof(0?(long)1:(long)2));
+  // ASSERT(-1, 0?(long)-2:-1);
+  // ASSERT(-1, 0?-2:(long)-1);
+  // ASSERT(-2, 1?(long)-2:-1);
+  // ASSERT(-2, 1?-2:(long)-1);
 
- //  ASSERT(3, ({ static void *p[]={&&v41,&&v42,&&v43}; int i=0; goto *p[0]; v41:i++; v42:i++; v43:i++; i; }));
- //  ASSERT(2, ({ static void *p[]={&&v52,&&v52,&&v53}; int i=0; goto *p[1]; v51:i++; v52:i++; v53:i++; i; }));
- //  ASSERT(1, ({ static void *p[]={&&v62,&&v62,&&v63}; int i=0; goto *p[2]; v61:i++; v62:i++; v63:i++; i; }));
+  // 1 ? -2 : (void)-1;
+
+  // ASSERT(20, ({ int x; int *p=&x; p+20-p; }));
+  // ASSERT(1, ({ int x; int *p=&x; p+20-p>0; }));
+  // ASSERT(-20, ({ int x; int *p=&x; p-20-p; }));
+  // ASSERT(1, ({ int x; int *p=&x; p-20-p<0; }));
+
+  // ASSERT(15, (char *)0xffffffffffffffff - (char *)0xfffffffffffffff0);
+  // ASSERT(-15, (char *)0xfffffffffffffff0 - (char *)0xffffffffffffffff);
+  // ASSERT(1, (void *)0xffffffffffffffff > (void *)0);
+
+  // ASSERT(3, 3?:5);
+  // ASSERT(5, 0?:5);
+  // ASSERT(4, ({ int i = 3; ++i?:10; }));
+
+  // ASSERT(3, (long double)3);
+  // ASSERT(5, (long double)3+2);
+  // ASSERT(6, (long double)3*2);
+  // ASSERT(5, (long double)3+2.0);
 
   printf("OK\n");
   return 0;

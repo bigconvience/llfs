@@ -339,7 +339,7 @@ void add_type(Node *node) {
     if (node->rhs->is_offset) {
       node->rhs = new_cast(node->rhs, ty_long);
     } else {
-      node->rhs->ty = node->ty;
+      node->rhs->ty = ty_int;
     }
     return;
   }

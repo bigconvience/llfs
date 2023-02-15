@@ -498,11 +498,11 @@ static llvm::BasicBlock *createBasicBlock() {
   return llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction); 
 }
 
-static llvm::BasicBlock *getBasicBlock(Node *node) {
-  llvm::BasicBlock *BB = find_basicblock(node->unique_label);
+static llvm::BasicBlock *getBasicBlock(char *label) {
+  llvm::BasicBlock *BB = find_basicblock(label);
   if (!BB) {
     BB = llvm::BasicBlock::Create(CGM().getLLVMContext());
-    push_basicblock(node->unique_label, BB);
+    push_basicblock(label, BB);
   }
   return BB;
 }
@@ -1399,10 +1399,42 @@ static void gen_do(Node *node) {
   Builder->SetInsertPoint(MergeBB);
 }
 
-static void gen_switch(Node *node) {
-
+static void add_switch_case(Node *node, llvm::SwitchInst *switchInst) {
+  if (node) {
+    add_switch_case(node->case_next, switchInst);
+    int caseV = node->begin;
+    while(caseV <= node->end) {
+      llvm::BasicBlock *BB = getBasicBlock(node->label);
+      switchInst->addCase(Builder->getInt32(caseV), BB);
+      caseV++;
+    }
+    // [GNU] Case ranges
+  }
 }
 
+static void gen_switch(Node *node) {
+  // gen swith condition
+  llvm::Value *condV = gen_expr(node->cond);
+  if (auto *constV = dyn_cast<llvm::ConstantInt>(condV)) {
+    int condInt = constV->getSExtValue();
+    // fixme constant fold
+    output << "condInt: " << condInt << std::endl;
+  }
+  char *label = node->default_case ? 
+    node->default_case->label : node->brk_label;
+  // gen switch branch
+  llvm::BasicBlock *defaultBB= getBasicBlock(label);
+  llvm::SwitchInst *switchInst = Builder->CreateSwitch(condV, defaultBB);
+  // collect case
+  add_switch_case(node->case_next, switchInst);
+  // gen switch body
+  gen_stmt(node->then);
+  llvm::BasicBlock *breakBB = getBasicBlock(node->brk_label);
+  // gen branch for default case
+  gen_branch(breakBB);
+  // out of switch
+  gen_basicblock(breakBB); 
+}
 static void gen_for(Node *node) {
   // step 1 gen init
   if (node->init)
@@ -1471,7 +1503,7 @@ static void gen_block(Node *node) {
   bool is_goto = false;
   for (Node *n = node->body; n; n = n->next) {
     // last stmt is goto, current is not label, ingore next stmt
-    if (is_goto && !(n->kind == ND_LABEL)) {
+    if (is_goto && n->kind != ND_LABEL && n->kind != ND_CASE) {
        break;
     }
     gen_stmt(n);
@@ -1486,7 +1518,7 @@ static void gen_compound_stmt(Node *node) {
 }
 
 static void gen_goto(Node *node) {
-  llvm::BasicBlock *BB = getBasicBlock(node);
+  llvm::BasicBlock *BB = getBasicBlock(node->unique_label);
   Builder->CreateBr(BB);
 }
 
@@ -1511,7 +1543,14 @@ static void gen_basicblock(llvm::BasicBlock *targetBB) {
 }
 
 static void gen_label(Node *node) {
-  llvm::BasicBlock *BB = getBasicBlock(node);
+  llvm::BasicBlock *BB = getBasicBlock(node->unique_label);
+  gen_branch(BB);
+  gen_basicblock(BB);
+  gen_stmt(node->lhs);
+}
+
+static void gen_case(Node *node) {
+  llvm::BasicBlock *BB = getBasicBlock(node->label);
   gen_branch(BB);
   gen_basicblock(BB);
   gen_stmt(node->lhs);
@@ -1538,6 +1577,9 @@ static void gen_stmt(Node *node) {
       break;
     case ND_SWITCH:
       gen_switch(node);
+      break;
+    case ND_CASE:
+      gen_case(node);
       break;
     case ND_BLOCK:
       gen_block(node);
