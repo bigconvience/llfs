@@ -5,7 +5,7 @@ int main() {
   ASSERT(3, ({ int x=3; int *y=&x; int **z=&y; **z; }));
   ASSERT(5, ({ int x=3; int y=5; *(&x-1); }));
   ASSERT(3, ({ int x=3; int y=5; *(&y+1); }));
-  ASSERT(5, ({ int x=3; int y=5; *(&y-(-1)); }));
+  ASSERT(3, ({ int x=3; int y=5; *(&y-(-1)); }));
   ASSERT(5, ({ int x=3; int *y=&x; *y=5; x; }));
   ASSERT(7, ({ int x=3; int y=5; *(&x-1)=7; y; }));
   ASSERT(7, ({ int x=3; int y=5; *(&y+2-1)=7; x; }));

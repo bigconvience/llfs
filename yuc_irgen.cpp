@@ -1254,7 +1254,7 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_var(node);
       break;
     case ND_MEMBER:
-      V = gen_expr(node->lhs);
+      V = gen_addr(node);
       break;
     case ND_DEREF:
       V = gen_deref(node);
@@ -1675,10 +1675,11 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
   if (!tag) {
-    type = llvm::StructType::get(*TheContext, Types, false);
+   // type = llvm::StructType::get(*TheContext, Types, false);
   } else {
-    type = llvm::StructType::create(*TheContext, Types, "", false);
+   // type = llvm::StructType::create(*TheContext, Types, "", false);
   }
+  type = llvm::StructType::create(*TheContext, Types, "", false);
   output << "isLiteral: " << type->isLiteral() << std::endl;
   if (tag) {
     push_tag_scope(ctype->tag, type);

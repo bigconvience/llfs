@@ -248,6 +248,8 @@ void add_type(Node *node) {
     node->ty = node->func_ty->return_ty;
     return;
   case ND_NOT:
+    node->ty = ty_int;
+    break;
   case ND_LOGOR:
   case ND_LOGAND:
     node->ty = ty_bool;
@@ -338,8 +340,10 @@ void add_type(Node *node) {
     node->ty = node->lhs->ty;
     if (node->rhs->is_offset) {
       node->rhs = new_cast(node->rhs, ty_long);
+    } else if (is_flonum(node->ty)) {
+      node->rhs->ty = node->ty;
     } else {
-      node->rhs->ty = ty_int;
+      node->rhs->ty = ty_int; 
     }
     return;
   }

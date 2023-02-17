@@ -8,7 +8,6 @@
 /chibicc
 /test/*.exe
 /stage2
-*.ll
 *.bc
 *.out
 .vscode
