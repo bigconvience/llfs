@@ -1,11 +1,10 @@
 #include "test.h"
 
 int main() {
-
-  ASSERT(2, ({ int x; if (2-1) x=2; else x=3; x; }));
-  ASSERT(55, ({ int i=0; int j=0; for (i=0; i<=10; i=i+1) j=i+j; j; }));
-  ASSERT(10, ({ int i=0; while(i<10) i=i+1; i; }));
-
+  ASSERT(0, ({ struct {char a; char b;} x[3]; char *p=x; p[0]=0; x[0].a; }));
+  ASSERT(1, ({ struct {char a; char b;} x[3]; char *p=x; p[1]=1; x[0].b; }));
+  ASSERT(2, ({ struct {char a; char b;} x[3]; char *p=x; p[2]=2; x[1].a; }));
+  ASSERT(3, ({ struct {char a; char b;} x[3]; char *p=x; p[3]=3; x[1].b; }));
   printf("OK\n");
   return 0;
 }

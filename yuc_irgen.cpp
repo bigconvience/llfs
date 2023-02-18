@@ -40,6 +40,7 @@ static void gen_stmt(Node *node);
 static llvm::Value *gen_addr(Node *node);
 static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *offset);
 static llvm::Value *gen_member(Node *node);
+static llvm::Value *gen_member_addr(Node *node);
 static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 static llvm::Value *gen_not(Node *node);
 static llvm::Value *gen_cond(Node *node);
@@ -589,7 +590,7 @@ static llvm::Value *gen_addr(Node *node) {
       }
       break;
     case ND_MEMBER:
-      Addr = gen_member(node);
+      Addr = gen_member_addr(node);
       break;
     case ND_DEREF:
       Addr = gen_expr(node->lhs);
@@ -611,28 +612,32 @@ llvm::Value *gen_deref(Node *node) {
   return load(node->ty, V);
 }
 
-static llvm::Value *gen_memeber_ptr(Node *node, llvm::Value *ptrval) {
-  llvm::Type *origPtrTy = yuc2LLVMType(node->lhs->ty);
-
+static llvm::Value *gen_member_ptr(Node *node, llvm::Value *ptrval) { 
   Member *member = node->member;
   std::vector<llvm::Value *> IndexValues;
   IndexValues.push_back(get_offset_int32(0));
   IndexValues.push_back(get_offset_int32(member->idx));
 
-  output << buildSeperator(stmt_level, "gen_memeber_ptr idx")
+  output << buildSeperator(stmt_level, "gen_member_ptr idx")
         << member->idx << std::endl;
-  // llvm::Value *target = Builder->CreateInBoundsGEP(origPtrTy, ptrval, IndexValues);
-  return nullptr;
+  llvm::Value *target = Builder->CreateInBoundsGEP(ptrval->getType()->getNonOpaquePointerElementType(), ptrval, IndexValues);
+  return target;
 }
 
-static llvm::Value *gen_member(Node *node) {
+static llvm::Value *gen_member_addr(Node *node) {
   int cur_level = ++stmt_level;
   output << buildSeperator(cur_level, "gen_member start") << std::endl;
   llvm::Value *base = gen_addr(node->lhs);
-  llvm::Value *ptr = gen_memeber_ptr(node, base);
+  llvm::Value *ptr = gen_member_ptr(node, base);
   --stmt_level;
   output << buildSeperator(cur_level, "gen_member end") << std::endl;
-  return base;
+  return ptr;
+}
+
+static llvm::Value *gen_member(Node *node) {
+  llvm::Value *memberAddr = gen_member_addr(node);
+  llvm::Type *memberType = yuc2LLVMType(node->ty);
+  return Builder->CreateLoad(memberType, memberAddr);
 }
 
 static llvm::Type *struct_to_primitive(int size) {
@@ -790,11 +795,9 @@ static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *
   llvm::Value *target = nullptr;
   llvm::Type *origPtrTy = nullptr;
   std::vector<llvm::Value *> IndexValues;
+  origPtrTy = baseAddr->getType()->getNonOpaquePointerElementType();
   if (node->ty->kind == TY_ARRAY) {
     IndexValues.push_back(getOffset(0));
-    origPtrTy = yuc2LLVMType(node->ty);
-  } else {
-    origPtrTy = yuc2LLVMType(node->ty->base);
   }
   IndexValues.push_back(offset);
   target = Builder->CreateInBoundsGEP(origPtrTy, baseAddr, IndexValues);
@@ -1254,7 +1257,7 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_var(node);
       break;
     case ND_MEMBER:
-      V = gen_addr(node);
+      V = gen_member(node);
       break;
     case ND_DEREF:
       V = gen_deref(node);
