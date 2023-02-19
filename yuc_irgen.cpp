@@ -54,6 +54,8 @@ static std::map<Obj *, llvm::Constant*> globalVars;
 static std::map<Type *, llvm::StructType*> tagToType;
 static llvm::Value *gen_number(Node *node);
 
+static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix);
+
 enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
 
 static int getTypeId(Type *ty) {
@@ -287,6 +289,9 @@ static int get_align(Obj *var) {
 }
 
 static char *get_ident(Token *tok) {
+  if (!tok) {
+    return "";
+  }
   if (tok->kind != TK_IDENT)
     error_tok(tok, "expected an identifier");
   return strndup(tok->loc, tok->len);
@@ -1649,8 +1654,11 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   llvm::StructType *type;
   int DesiredSize = ctype->size;
   Token *tag = ctype->tag;
+  // tag
+  llvm::StringRef suffix = get_ident(tag);
   output << "yuc2StructType DesiredSize:" << DesiredSize 
         << " is_typedef:" << ctype->is_typedef
+        << " tag: " << suffix.data()
         << " align:" << ctype->align << std::endl;
   // union
   if (member) {
@@ -1674,15 +1682,13 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
     return type;
   }
   // struct
+  type = llvm::StructType::create(*TheContext);
+  addRecordTypeName(ctype, type, suffix);
+
   for (Member *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
-  if (!tag) {
-   // type = llvm::StructType::get(*TheContext, Types, false);
-  } else {
-   // type = llvm::StructType::create(*TheContext, Types, "", false);
-  }
-  type = llvm::StructType::create(*TheContext, Types, "", false);
+  type->setBody(Types);
   output << "isLiteral: " << type->isLiteral() << std::endl;
   if (tag) {
     push_tag_scope(ctype->tag, type);
@@ -1690,7 +1696,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   return type;
 }
 
-void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix) {
+static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix) {
   llvm::SmallString<256> TypeName;
   llvm::raw_svector_ostream OS(TypeName);
   std::string kindName = ctypeKindString(ctype->kind);
@@ -1715,11 +1721,6 @@ static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
     }
   }
   llvm::StructType *DesiredType = yuc2StructType(ctype);
-  llvm::StringRef suffix = "";
-  if (ctype->is_typedef) {
-    suffix = get_ident(ctype->tag);
-  }
-  addRecordTypeName(ctype, DesiredType, suffix);
   return DesiredType;
 }
 
