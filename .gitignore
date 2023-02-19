@@ -10,4 +10,5 @@
 /stage2
 *.bc
 *.out
+*.ll
 .vscode
