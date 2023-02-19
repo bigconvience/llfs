@@ -371,8 +371,22 @@ static void push_constant(Obj *var, llvm::Value *v) {
   scope->constants[var_name] = v;
 }
 
-static llvm::StructType *find_tag(Token *tag) {
-  std::string tag_name = get_ident(tag);
+static std::string get_tag_name(Type *tagType) {
+  if (!tagType) {
+    return "";
+  }
+  Token *tag = tagType->tag;
+  if (!tag) {
+    return "";
+  }
+  int scope_level = tagType->scope_level;
+  std::string tag_name = get_ident(tag) + std::to_string(scope_level);
+  output << "get_tag_name: " << tag_name.data() << std::endl;
+  return tag_name;
+}
+
+static llvm::StructType *find_tag(Type *tagType) {
+  std::string tag_name = get_tag_name(tagType);
   for (BlockScope *sc = scope; sc; sc = sc->next) {
     llvm::StructType *type = sc->tags[tag_name];
     if (type) {
@@ -382,9 +396,8 @@ static llvm::StructType *find_tag(Token *tag) {
   return nullptr;
 }
 
-static void push_tag_scope(Token *tag, llvm::StructType *ty) {
-  std::string tag_name = get_ident(tag);
-  output << "push tag: " << tag_name.data() << std::endl;
+static void push_tag_scope(Type *tagType, llvm::StructType *ty) {
+  std::string tag_name = get_tag_name(tagType);
   scope->tags[tag_name] = ty;
 }
 
@@ -779,6 +792,7 @@ static llvm::Value *gen_stmt_expr(Node *node) {
   llvm::Value *V = nullptr;
   int cur_level = ++stmt_level;
   output << buildSeperator(cur_level, "gen_stmt_expr start") << std::endl;
+  enter_scope();
   for (Node *n = node->body; n; n = n->next) {
     gen_stmt(n);
   }
@@ -788,6 +802,7 @@ static llvm::Value *gen_stmt_expr(Node *node) {
     llvm::Value *lastAddr = find_var(lastVar);
     V = load(lastVar->ty, lastAddr);
   }
+  leave_scope();
   output << buildSeperator(cur_level, "gen_stmt_expr end") << std::endl;
   --stmt_level;
   return V;
@@ -1691,7 +1706,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   type->setBody(Types);
   output << "isLiteral: " << type->isLiteral() << std::endl;
   if (tag) {
-    push_tag_scope(ctype->tag, type);
+    push_tag_scope(ctype, type);
   }
   return type;
 }
@@ -1714,11 +1729,9 @@ static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef
 static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
   Token *tag = ctype->tag;
   llvm::StructType *ty = nullptr;
-  if (tag) {
-    ty = find_tag(tag);
-    if (ty) {
-      return ty;
-    }
+  ty = find_tag(ctype);
+  if (ty) {
+    return ty;
   }
   llvm::StructType *DesiredType = yuc2StructType(ctype);
   return DesiredType;

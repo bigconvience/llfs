@@ -398,6 +398,7 @@ struct Type {
 
   bool is_typedef;
   Token *tag;
+  int scope_level;
 };
 
 // Struct member
