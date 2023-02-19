@@ -55,6 +55,7 @@ static std::map<Type *, llvm::StructType*> tagToType;
 static llvm::Value *gen_number(Node *node);
 
 static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix);
+static llvm::Type *emit_pointer_type(Type *ctype);
 
 enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
 
@@ -84,6 +85,12 @@ static int getTypeId(Type *ty) {
 
 static bool is_bool_value(llvm::Value *V) {
   return V->getType() == Builder->getInt1Ty();
+}
+
+// ptr to i8* 
+static llvm::Value *uniform_address(llvm::Value *V) {
+  llvm::Type * type = llvm::PointerType::get(Builder->getInt8Ty(), 0);
+  return Builder->CreateBitCast(V, type);
 }
 
 // float to bool
@@ -304,7 +311,7 @@ struct BlockScope {
   BlockScope *next;
 
   std::map<std::string, llvm::Value *> vars;
-  std::map<std::string, llvm::StructType *> tags;
+  std::map<Type*, llvm::StructType *> tags;
   std::map<std::string, llvm::Value *> constants;
 };
 
@@ -371,24 +378,9 @@ static void push_constant(Obj *var, llvm::Value *v) {
   scope->constants[var_name] = v;
 }
 
-static std::string get_tag_name(Type *tagType) {
-  if (!tagType) {
-    return "";
-  }
-  Token *tag = tagType->tag;
-  if (!tag) {
-    return "";
-  }
-  int scope_level = tagType->scope_level;
-  std::string tag_name = get_ident(tag) + std::to_string(scope_level);
-  output << "get_tag_name: " << tag_name.data() << std::endl;
-  return tag_name;
-}
-
 static llvm::StructType *find_tag(Type *tagType) {
-  std::string tag_name = get_tag_name(tagType);
   for (BlockScope *sc = scope; sc; sc = sc->next) {
-    llvm::StructType *type = sc->tags[tag_name];
+    llvm::StructType *type = sc->tags[tagType];
     if (type) {
       return type;
     }
@@ -397,8 +389,7 @@ static llvm::StructType *find_tag(Type *tagType) {
 }
 
 static void push_tag_scope(Type *tagType, llvm::StructType *ty) {
-  std::string tag_name = get_tag_name(tagType);
-  scope->tags[tag_name] = ty;
+  scope->tags[tagType] = ty;
 }
 
 /// Return the value offset.
@@ -542,12 +533,17 @@ static llvm::Value *gen_rvalue(Node *node, Obj *var) {
     return V;
   }
   llvm::Value *Addr = gen_addr(node);
-  if (node->ty->kind == TY_ARRAY) {
-    // r_value(arr) =  GEP(array, 0, 0);
+  Type *varTy = var->ty;
+  switch(node->ty->kind) {
+  case TY_ARRAY:
     V = gen_get_ptr(node, Addr, getOffset(0));
-  } else {
-    Type *varTy = var->ty;
+    break;
+  case TY_STRUCT:
+    V = Addr;
+    break;
+  default:
     V = load(varTy, Addr);
+    break;
   }
   return V; 
 }
@@ -624,10 +620,16 @@ static llvm::Value *gen_addr(Node *node) {
 
 llvm::Value *gen_deref(Node *node) {
   llvm::Value *V = gen_addr(node);
-  if (node->ty->kind == TY_ARRAY) {
-    return gen_get_ptr(node, V, getOffset(0));
+  switch(node->ty->kind) {
+  case TY_ARRAY:
+    V = gen_get_ptr(node, V, getOffset(0));
+    break;
+  case TY_STRUCT:
+    break;
+  default:
+    V = load(node->ty, V);
   }
-  return load(node->ty, V);
+  return V;
 }
 
 static llvm::Value *gen_member_ptr(Node *node, llvm::Value *ptrval) { 
@@ -1062,7 +1064,31 @@ static llvm::Value *gen_bitnot(Node *node) {
   return Builder->CreateXor(operand, -1);
 }
 
+static llvm::Value *emit_assign_struct(Node *node) {
+  output << buildSeperator(stmt_level, "emit_assign_struct") << std::endl;
+  llvm::Value *addrL, *addrR, *operandL, *operandR;
+  addrL = gen_addr(node->lhs);
+  if (node->lhs->kind == ND_DEREF) {
+    addrR = gen_addr(node->rhs);
+    operandL = uniform_address(addrL);
+  } else {
+    operandL = uniform_address(addrL);
+    addrR = gen_addr(node->rhs);
+  }
+  operandR = uniform_address(addrR);
+  
+  Type *ty = node->lhs->ty;
+  llvm::Value *Size = getOffset(ty->size);
+  llvm::MaybeAlign Align = llvm::MaybeAlign(ty->align);
+  llvm::CallInst *callInst 
+    = Builder->CreateMemCpy(operandL, Align, operandR, Align, Size);
+  return addrR;
+}
+
 static llvm::Value *gen_assign(Node *node) {
+  if (is_struct(node->ty)) {
+   return emit_assign_struct(node);
+  }
   llvm::Value *operandL, *operandR;
   operandL = gen_addr(node->lhs);
   operandR = gen_expr(node->rhs);
@@ -1639,8 +1665,7 @@ static llvm::ArrayType *yuc2ArrayType(Type *ctype) {
   return type;
 }
 
-static llvm::Type *yuc2PointerType(Type *ctype) {
-  // output << "yuc2PointerType baseType ";
+static llvm::Type *emit_pointer_type(Type *ctype) {
   Type *baseTy = ctype->base;
   llvm::Type *base = nullptr;
   if (baseTy->kind == TY_VOID) {
@@ -1699,15 +1724,13 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   // struct
   type = llvm::StructType::create(*TheContext);
   addRecordTypeName(ctype, type, suffix);
+  push_tag_scope(ctype, type);
 
   for (Member *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
   }
   type->setBody(Types);
   output << "isLiteral: " << type->isLiteral() << std::endl;
-  if (tag) {
-    push_tag_scope(ctype, type);
-  }
   return type;
 }
 
@@ -1728,8 +1751,7 @@ static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef
 
 static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
   Token *tag = ctype->tag;
-  llvm::StructType *ty = nullptr;
-  ty = find_tag(ctype);
+  llvm::StructType *ty = find_tag(ctype);
   if (ty) {
     return ty;
   }
@@ -1766,7 +1788,7 @@ static llvm::Type *yuc2LLVMType(Type *ctype) {
       type = CGM().getX86_FP80Ty();
       break;
     case TY_PTR:
-     	type = yuc2PointerType(ctype);
+     	type = emit_pointer_type(ctype);
       break;
     case TY_ARRAY:
       type = yuc2ArrayType(ctype);

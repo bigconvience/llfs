@@ -109,6 +109,7 @@ static Node *current_switch;
 static Obj *builtin_alloca;
 
 static int retCount;
+static int scope_level = 0;
 
 static bool is_typename(Token *tok);
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
@@ -170,6 +171,7 @@ static void enter_scope(void) {
   Scope *sc = new Scope();
   sc->next = scope;
   scope = sc;
+  scope_level++;
 }
 
 static void leave_scope(void) {
@@ -369,6 +371,8 @@ static Type *find_typedef(Token *tok) {
 }
 
 static void push_tag_scope(Token *tok, Type *ty) {
+  ty->scope_level = scope_level;
+  ty->tag = tok;
   hashmap_put2(&scope->tags, tok->loc, tok->len, ty);
 }
 
@@ -778,7 +782,6 @@ static Type *enum_specifier(Token **rest, Token *tok) {
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
     tag = tok;
-    ty->tag = tag;
     tok = tok->next;
   }
 
@@ -2719,12 +2722,12 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
     tag = tok;
-    ty->tag = tag;
     tok = tok->next;
   }
 
   if (tag && !equal(tok, "{")) {
     *rest = tok;
+
     Type *ty2 = find_tag(tag);
     if (ty2)
       return ty2;
@@ -3390,6 +3393,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   retCount = 0;
   current_fn = fn;
   locals = NULL;
+  scope_level = 1;
   enter_scope();
   create_param_lvars(ty->params);
 
