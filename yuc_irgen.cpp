@@ -44,6 +44,8 @@ static llvm::Value *gen_member_addr(Node *node);
 static llvm::Value *gen_get_addr(llvm::Value *baseAddr);
 static llvm::Value *gen_not(Node *node);
 static llvm::Value *gen_cond(Node *node);
+static llvm::Value *gen_comma(Node *node);
+static llvm::Value *gen_comma_addr(Node *node);
 static void gen_label(Node *node);
 
 static void gen_branch(llvm::BasicBlock *target);
@@ -612,6 +614,9 @@ static llvm::Value *gen_addr(Node *node) {
     case ND_SUBSCRIPT: 
       Addr = gen_subscript_addr(node);
       break;
+    case ND_COMMA:
+      Addr = gen_comma_addr(node);
+      break;
   }
   --stmt_level;
   output << buildSeperator(cur_level, "gen_addr end") << std::endl;
@@ -638,7 +643,7 @@ static llvm::Value *gen_member_ptr(Node *node, llvm::Value *ptrval) {
   IndexValues.push_back(get_offset_int32(0));
   IndexValues.push_back(get_offset_int32(member->idx));
 
-  output << buildSeperator(stmt_level, "gen_member_ptr idx")
+  output << buildSeperator(stmt_level, "gen_member_ptr idx: ")
         << member->idx << std::endl;
   llvm::Value *target = Builder->CreateInBoundsGEP(ptrval->getType()->getNonOpaquePointerElementType(), ptrval, IndexValues);
   return target;
@@ -947,6 +952,18 @@ static llvm::Value *gen_prefix(Node *node, bool isInc) {
   return sum;
 }
 
+static llvm::Value *gen_comma(Node *node) {
+  gen_expr(node->lhs);
+  llvm::Value *V = gen_expr(node->rhs);
+  return V;
+}
+
+static llvm::Value *gen_comma_addr(Node *node) {
+  gen_expr(node->lhs);
+  llvm::Value *V = gen_addr(node->rhs);
+  return V;
+}
+
 static llvm::Value *gen_cond(Node *node) {
   if (node->ty->kind == TY_VOID) {
     return nullptr;
@@ -1086,6 +1103,11 @@ static llvm::Value *emit_assign_struct(Node *node) {
 }
 
 static llvm::Value *gen_assign(Node *node) {
+  Node *lhs = node->lhs;
+  output << buildSeperator(stmt_level, "gen_assign start:") 
+      << " is_const_expr: " << is_const_expr(lhs)
+      << " is_struct: " << is_struct(node->ty)
+      << std::endl;
   if (is_struct(node->ty)) {
    return emit_assign_struct(node);
   }
@@ -1093,9 +1115,6 @@ static llvm::Value *gen_assign(Node *node) {
   operandL = gen_addr(node->lhs);
   operandR = gen_expr(node->rhs);
   genStore(operandR, operandL);
-  Node *lhs = node->lhs;
-  output << buildSeperator(stmt_level, "gen assign start:") 
-      << " is_const_expr: " << is_const_expr(lhs) << std::endl;
   if (is_const_expr(lhs)) {
      push_constant(lhs->var, operandR);
   }
@@ -1269,8 +1288,7 @@ static llvm::Value *gen_expr(Node *node) {
     case ND_NULL_EXPR:
       break;
     case ND_COMMA:
-      gen_expr(node->lhs);
-      V = gen_expr(node->rhs);
+      V = gen_comma(node);
       break;
     case ND_COND:
       V = gen_cond(node);

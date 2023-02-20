@@ -57,7 +57,7 @@ int main() {
   // ASSERT(1, ({ struct T { struct T *next; int x; } a; struct T b; b.x=1; a.next=&b; a.next->x; }));
   // ASSERT(4, ({ typedef struct T T; struct T { int x; }; sizeof(T); }));
 
-struct {int a;} x={1}, y={2}; 
+struct {int a; int b;} x={1, 2}; 
 
   //SSERT(2, ({ struct {int a;} x={1}, y={2}; (x=y).a; }));
   // ASSERT(1, ({ struct {int a;} x={1}, y={2}; (1?x:y).a; }));
