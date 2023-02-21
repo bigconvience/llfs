@@ -1081,10 +1081,53 @@ static llvm::Value *gen_bitnot(Node *node) {
   return Builder->CreateXor(operand, -1);
 }
 
+static llvm::Value *emit_memcpy(llvm::Value *dest, llvm::Value *src, Type *ty) {
+  llvm::Value *Size = getOffset(ty->size);
+  llvm::MaybeAlign Align = llvm::MaybeAlign(ty->align);
+  return Builder->CreateMemCpy(dest, Align, src, Align, Size);
+}
+
+static llvm::Value *emit_struct_condition(Node *node, llvm::Value *dest) {
+  output << buildSeperator(stmt_level, "emit_struct_condition") << std::endl;
+  llvm::Value *condV, *thenV, *elseV;
+  // 0. gen condition
+  condV = gen_to_bool(node->cond);
+
+  llvm::BasicBlock *ThenBB = createBasicBlock();
+  llvm::BasicBlock *ElseBB = createBasicBlock();
+  llvm::BasicBlock *MergeBB = createBasicBlock();
+  // 1. create branch
+  Builder->CreateCondBr(condV, ThenBB, ElseBB);
+  // 2. then expr
+  Builder->SetInsertPoint(ThenBB);
+  llvm::Value *target_addr = uniform_address(dest);
+  thenV = gen_expr(node->then);
+  llvm::Value *src_addr = uniform_address(thenV);
+  emit_memcpy(target_addr, src_addr, node->then->ty);
+  Builder->CreateBr(MergeBB);
+  // 3. else expr
+  Builder->SetInsertPoint(ElseBB);
+  target_addr = uniform_address(dest);
+  elseV = gen_expr(node->els);
+  src_addr = uniform_address(elseV);
+  emit_memcpy(target_addr, src_addr, node->els->ty);  
+  Builder->CreateBr(MergeBB);
+  // 4. merge basic block
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  Builder->SetInsertPoint(MergeBB);
+  return dest;
+}
+
 static llvm::Value *emit_assign_struct(Node *node) {
   output << buildSeperator(stmt_level, "emit_assign_struct") << std::endl;
   llvm::Value *addrL, *addrR, *operandL, *operandR;
   addrL = gen_addr(node->lhs);
+  if (node->rhs->kind == ND_COND) {
+    // case: struct T x, y, z; int a =3;
+    // z = a ? x : y;
+    emit_struct_condition(node->rhs, addrL);
+    return addrL;
+  }
   if (node->lhs->kind == ND_DEREF) {
     addrR = gen_addr(node->rhs);
     operandL = uniform_address(addrL);
@@ -1094,11 +1137,7 @@ static llvm::Value *emit_assign_struct(Node *node) {
   }
   operandR = uniform_address(addrR);
   
-  Type *ty = node->lhs->ty;
-  llvm::Value *Size = getOffset(ty->size);
-  llvm::MaybeAlign Align = llvm::MaybeAlign(ty->align);
-  llvm::CallInst *callInst 
-    = Builder->CreateMemCpy(operandL, Align, operandR, Align, Size);
+  llvm::Value *dest = emit_memcpy(operandL, operandR, node->ty);
   return addrR;
 }
 
