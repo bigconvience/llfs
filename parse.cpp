@@ -343,6 +343,25 @@ static char *new_stmt_expr_name(void) {
   return format(".stmt..%d", id++);
 }
 
+static char *new_struct_shadow_name(void) {
+  static int id = 0;
+  return format(".struct..%d", id++);
+}
+
+static char *new_tag_name(void) {
+  static int id = 0;
+  return format(".tag..%d", id++);
+}
+
+static Token *new_token_tag() {
+  char *tag_name = new_tag_name();
+  Token *tag = new Token();
+  tag->kind = TK_IDENT;
+  tag->loc = tag_name;
+  tag->len = strlen(tag_name);
+  return tag;
+}
+
 static Obj *new_anon_gvar(Type *ty) {
   return new_gvar(new_unique_name(), ty);
 }
@@ -2734,6 +2753,10 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
     return ty;
   }
 
+  if (!tag) {
+    ty->tag = new_token_tag();
+  }
+
   tok = skip(tok, "{");
 
   // Construct a struct object.
@@ -2861,7 +2884,10 @@ static Node *struct_ref(Node *node, Token *tok) {
     error_tok(node->tok, "not a struct nor a union");
 
   Type *ty = node->ty;
-
+  if (node->kind != ND_VAR && node->kind != ND_MEMBER) {
+    Obj *shadow = new_lvar(new_struct_shadow_name(), node->ty);
+    node = new_binary(ND_ASSIGN, new_var_node(shadow, tok), node, tok);
+  }
   for (;;) {
     Member *mem = get_struct_member(ty, tok);
     if (!mem)

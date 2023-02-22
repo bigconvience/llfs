@@ -63,8 +63,8 @@ int main() {
 
     struct t {int a;} x={1}, y={2},q;     
     int cond2 = 2;
-    q = cond2 ? x : y;
-
+    //q = cond2 ? x : y;
+    int b = (cond2?x:y).a;
    //ASSERT(1, ({ struct {int a;} x={1}, y={2}; x.a; }));
    //ASSERT(2, ({ struct {int a;} x={1}, y={2}; (0?x:y).a; }));
 

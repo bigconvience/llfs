@@ -313,7 +313,7 @@ struct BlockScope {
   BlockScope *next;
 
   std::map<std::string, llvm::Value *> vars;
-  std::map<Type*, llvm::StructType *> tags;
+  std::map<std::string, llvm::StructType *> tags;
   std::map<std::string, llvm::Value *> constants;
 };
 
@@ -380,9 +380,10 @@ static void push_constant(Obj *var, llvm::Value *v) {
   scope->constants[var_name] = v;
 }
 
-static llvm::StructType *find_tag(Type *tagType) {
+static llvm::StructType *find_tag(Token *tag) {
+  std::string tag_name = get_ident(tag);
   for (BlockScope *sc = scope; sc; sc = sc->next) {
-    llvm::StructType *type = sc->tags[tagType];
+    llvm::StructType *type = sc->tags[tag_name];
     if (type) {
       return type;
     }
@@ -390,8 +391,9 @@ static llvm::StructType *find_tag(Type *tagType) {
   return nullptr;
 }
 
-static void push_tag_scope(Type *tagType, llvm::StructType *ty) {
-  scope->tags[tagType] = ty;
+static void push_tag_scope(Token *tag, llvm::StructType *ty) {
+  std::string tag_name = get_ident(tag);
+  scope->tags[tag_name] = ty;
 }
 
 /// Return the value offset.
@@ -616,6 +618,10 @@ static llvm::Value *gen_addr(Node *node) {
       break;
     case ND_COMMA:
       Addr = gen_comma_addr(node);
+      break;
+    case ND_ASSIGN:
+    case ND_COND:
+      Addr = gen_expr(node);
       break;
   }
   --stmt_level;
@@ -1781,7 +1787,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   // struct
   type = llvm::StructType::create(*TheContext);
   addRecordTypeName(ctype, type, suffix);
-  push_tag_scope(ctype, type);
+  push_tag_scope(ctype->tag, type);
 
   for (Member *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
@@ -1807,8 +1813,7 @@ static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef
 }
 
 static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
-  Token *tag = ctype->tag;
-  llvm::StructType *ty = find_tag(ctype);
+  llvm::StructType *ty = find_tag(ctype->tag);
   if (ty) {
     return ty;
   }
