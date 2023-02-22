@@ -58,15 +58,6 @@ int main() {
   // ASSERT(4, ({ typedef struct T T; struct T { int x; }; sizeof(T); }));
 
 
-  //ASSERT(2, ({ struct {int a;} x={1}, y={2}; y.a; }));
-  //struct {int a;} x={1}, y={2}; 
-
-    struct t {int a;} x={1}, y={2},q;     
-    int cond2 = 2;
-    //q = cond2 ? x : y;
-    int b = (cond2?x:y).a;
-   //ASSERT(1, ({ struct {int a;} x={1}, y={2}; x.a; }));
-   //ASSERT(2, ({ struct {int a;} x={1}, y={2}; (0?x:y).a; }));
 
   printf("OK\n");
   return 0;

@@ -109,6 +109,7 @@ static Node *current_switch;
 static Obj *builtin_alloca;
 
 static int retCount;
+static int scope_level = 0;
 
 static bool is_typename(Token *tok);
 static Type *declspec(Token **rest, Token *tok, VarAttr *attr);
@@ -167,6 +168,7 @@ static int align_down(int n, int align) {
 }
 
 static void enter_scope(void) {
+  scope_level++;
   Scope *sc = new Scope();
   sc->next = scope;
   scope = sc;
@@ -792,7 +794,7 @@ static bool consume_end(Token **rest, Token *tok) {
 // enum-list      = ident ("=" num)? ("," ident ("=" num)?)* ","?
 static Type *enum_specifier(Token **rest, Token *tok) {
   Type *ty = enum_type();
-
+  ty->scope_level = scope_level;
   // Read a struct tag.
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
@@ -809,6 +811,9 @@ static Type *enum_specifier(Token **rest, Token *tok) {
       error_tok(tag, "not an enum tag");
     *rest = tok;
     return ty;
+  }
+  if (!tag) {
+    ty->tag = new_token_tag();
   }
 
   tok = skip(tok, "{");
@@ -2732,6 +2737,7 @@ static Token *attribute_list(Token *tok, Type *ty) {
 // struct-union-decl = attribute? ident? ("{" struct-members)?
 static Type *struct_union_decl(Token **rest, Token *tok) {
   Type *ty = struct_type();
+  ty->scope_level = scope_level;
   tok = attribute_list(tok, ty);
 
   // Read a tag.
@@ -3416,6 +3422,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr) {
   retCount = 0;
   current_fn = fn;
   locals = NULL;
+  scope_level = 1;
   enter_scope();
   create_param_lvars(ty->params);
 

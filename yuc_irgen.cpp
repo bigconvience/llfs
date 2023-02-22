@@ -340,6 +340,12 @@ static std::string get_scope_name(Obj *var) {
   return var_name;
 }
 
+static std::string get_tag_name(Type *ty) {
+  std::string tag_name = get_ident(ty->tag);
+  tag_name.append(std::to_string(ty->scope_level));
+  return tag_name;
+}
+
 static llvm::Value *find_var(Obj *var) {
   std::string var_name = get_scope_name(var);
   for (BlockScope *sc = scope; sc; sc = sc->next) {
@@ -380,8 +386,8 @@ static void push_constant(Obj *var, llvm::Value *v) {
   scope->constants[var_name] = v;
 }
 
-static llvm::StructType *find_tag(Token *tag) {
-  std::string tag_name = get_ident(tag);
+static llvm::StructType *find_tag(Type *ty) {
+  std::string tag_name = get_tag_name(ty);
   for (BlockScope *sc = scope; sc; sc = sc->next) {
     llvm::StructType *type = sc->tags[tag_name];
     if (type) {
@@ -391,9 +397,9 @@ static llvm::StructType *find_tag(Token *tag) {
   return nullptr;
 }
 
-static void push_tag_scope(Token *tag, llvm::StructType *ty) {
-  std::string tag_name = get_ident(tag);
-  scope->tags[tag_name] = ty;
+static void push_tag_scope(Type *ty, llvm::StructType *type) {
+  std::string tag_name = get_tag_name(ty);
+  scope->tags[tag_name] = type;
 }
 
 /// Return the value offset.
@@ -1787,7 +1793,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   // struct
   type = llvm::StructType::create(*TheContext);
   addRecordTypeName(ctype, type, suffix);
-  push_tag_scope(ctype->tag, type);
+  push_tag_scope(ctype, type);
 
   for (Member *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
@@ -1813,7 +1819,7 @@ static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef
 }
 
 static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
-  llvm::StructType *ty = find_tag(ctype->tag);
+  llvm::StructType *ty = find_tag(ctype);
   if (ty) {
     return ty;
   }
