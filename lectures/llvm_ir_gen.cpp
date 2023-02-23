@@ -11,6 +11,10 @@ static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
 static std::unique_ptr<llvm::IRBuilder<>> Builder;
 
+static llvm::LLVMContext &getLLVMContext() {
+  return TheModule->getContext();
+}
+
 static void print_type(Type *type) {
   if (!type) {
     return;
@@ -60,7 +64,23 @@ static uint64_t read_integer_from_buf(const char *buf, int size) {
   }
 }
 
-static llvm::Constant *build_integer(llvm::Type *type, Type *ctype, char *buf, int offset) {
+static llvm::Constant *build_float(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
+  if (!buf) {
+    return llvm::Constant::getNullValue(type);
+  }
+  float f_val = *(float *)(buf + offset);
+  return llvm::ConstantFP::get(getLLVMContext(), llvm::APFloat(f_val));
+}
+
+static llvm::Constant *build_double(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
+  if (!buf) {
+    return llvm::Constant::getNullValue(type);
+  }
+  double df_val = *(double *)(buf + offset);
+  return llvm::ConstantFP::get(getLLVMContext(), llvm::APFloat(df_val));
+}
+
+static llvm::Constant *build_integer(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
   if (!buf) {
     return llvm::Constant::getNullValue(type);
   }
@@ -75,7 +95,13 @@ static llvm::Constant *build_constant(llvm::Type *type, Type *ctype, Relocation 
   case TY_SHORT:
   case TY_INT:
   case TY_LONG:
-    constant = build_integer(type, ctype, buf, offset);
+    constant = build_integer(type, ctype, buf, offset, rel);
+    break;
+  case TY_FLOAT:
+    constant = build_float(type, ctype, buf, offset, rel);
+    break;
+  case TY_DOUBLE:
+    constant = build_double(type, ctype, buf, offset, rel);
     break;
   default:
     constant = Builder->getInt32(-1024);
