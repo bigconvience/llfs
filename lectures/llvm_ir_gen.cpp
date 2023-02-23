@@ -11,6 +11,12 @@ static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
 static std::unique_ptr<llvm::IRBuilder<>> Builder;
 
+static void InitializeModule(const std::string &filename) {
+  TheContext = std::make_unique<llvm::LLVMContext>();
+  TheModule = std::make_unique<llvm::Module>(filename, *TheContext);
+  Builder = std::make_unique<llvm::IRBuilder<>>(*TheContext);
+}
+
 static llvm::LLVMContext &getLLVMContext() {
   return TheModule->getContext();
 }
@@ -35,84 +41,9 @@ static void print_obj(Obj *obj) {
 }
 
 static void dump_obj(Obj *obj) {
-  if (!DUMP_OBJ) {
-    return;
-  }
   for (Obj *cur = obj; cur; cur = cur->next) {
     print_obj(cur);
   }
-}
-
-static void InitializeModule(const std::string &filename) {
-  TheContext = std::make_unique<llvm::LLVMContext>();
-  TheModule = std::make_unique<llvm::Module>(filename, *TheContext);
-  Builder = std::make_unique<llvm::IRBuilder<>>(*TheContext);
-}
-
-static uint64_t read_integer_from_buf(const char *buf, int size) {
-  switch(size) {
-  case 1:
-    return *buf;
-  case 2:
-    return *(uint16_t *)buf;
-  case 4:
-    return *(uint32_t *)buf;
-  case 8:
-    return *(uint64_t *)buf;
-  default:
-    return *buf;
-  }
-}
-
-static llvm::Constant *build_float(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
-  if (!buf) {
-    return llvm::Constant::getNullValue(type);
-  }
-  float f_val = *(float *)(buf + offset);
-  return llvm::ConstantFP::get(getLLVMContext(), llvm::APFloat(f_val));
-}
-
-static llvm::Constant *build_double(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
-  if (!buf) {
-    return llvm::Constant::getNullValue(type);
-  }
-  double df_val = *(double *)(buf + offset);
-  return llvm::ConstantFP::get(getLLVMContext(), llvm::APFloat(df_val));
-}
-
-static llvm::Constant *build_integer(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
-  if (!buf) {
-    return llvm::Constant::getNullValue(type);
-  }
-  return llvm::ConstantInt::get(type, read_integer_from_buf(buf + offset, ctype->size));
-}
-
-static llvm::Constant *build_constant(llvm::Type *type, Type *ctype, Relocation *rel, char *buf, int offset) {  
-  llvm::Constant *constant = nullptr;
-  int size = ctype->size;
-  switch(ctype->kind) {
-  case TY_CHAR:
-  case TY_SHORT:
-  case TY_INT:
-  case TY_LONG:
-    constant = build_integer(type, ctype, buf, offset, rel);
-    break;
-  case TY_FLOAT:
-    constant = build_float(type, ctype, buf, offset, rel);
-    break;
-  case TY_DOUBLE:
-    constant = build_double(type, ctype, buf, offset, rel);
-    break;
-  default:
-    constant = Builder->getInt32(-1024);
-    break;
-  }
-  return constant;
-}
-
-static llvm::Constant *build_initializer(llvm::Type *type, Obj *var) {
-  llvm::Constant *constant = build_constant(type, var->ty, var->rel, var->init_data, 0);
-  return constant;  
 }
 
 static llvm::Type *create_type(Type *ty) {
@@ -141,6 +72,73 @@ static llvm::Type *create_type(Type *ty) {
     break;
   }
   return type;
+}
+
+static llvm::Constant *build_float(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
+  if (!buf) {
+    return llvm::Constant::getNullValue(type);
+  }
+  float f_val = *(float *)(buf + offset);
+  return llvm::ConstantFP::get(getLLVMContext(), llvm::APFloat(f_val));
+}
+
+static llvm::Constant *build_double(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
+  if (!buf) {
+    return llvm::Constant::getNullValue(type);
+  }
+  double df_val = *(double *)(buf + offset);
+  return llvm::ConstantFP::get(getLLVMContext(), llvm::APFloat(df_val));
+}
+
+
+static uint64_t read_integer_from_buf(const char *buf, int size) {
+  switch(size) {
+  case 1:
+    return *buf;
+  case 2:
+    return *(uint16_t *)buf;
+  case 4:
+    return *(uint32_t *)buf;
+  case 8:
+    return *(uint64_t *)buf;
+  default:
+    return *buf;
+  }
+}
+
+static llvm::Constant *build_integer(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
+  if (!buf) {
+    return llvm::Constant::getNullValue(type);
+  }
+  return llvm::ConstantInt::get(type, read_integer_from_buf(buf + offset, ctype->size));
+}
+
+static llvm::Constant *build_constant(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
+  llvm::Constant *constant = nullptr;
+  int size = ctype->size;
+  switch(ctype->kind) {
+  case TY_CHAR:
+  case TY_SHORT:
+  case TY_INT:
+  case TY_LONG:
+    constant = build_integer(type, ctype, buf, offset, rel);
+    break;
+  case TY_FLOAT:
+    constant = build_float(type, ctype, buf, offset, rel);
+    break;
+  case TY_DOUBLE:
+    constant = build_double(type, ctype, buf, offset, rel);
+    break;
+  default:
+    constant = Builder->getInt32(-1024);
+    break;
+  }
+  return constant;
+}
+
+static llvm::Constant *build_initializer(llvm::Type *type, Obj *var) {
+  llvm::Constant *constant = build_constant(type, var->ty, var->init_data, 0, var->rel);
+  return constant;  
 }
 
 static llvm::GlobalValue::LinkageTypes create_linkage_type(Obj *var) {
@@ -177,7 +175,9 @@ static void emit_data(Obj *prog) {
 
 void gen_ir(Obj *prog, const std::string &filename) {
   InitializeModule(filename);
-  dump_obj(prog);
+  if (DUMP_OBJ) {
+    dump_obj(prog);
+  }
   emit_data(prog);
   TheModule->print(llvm::outs(), nullptr);
 }
