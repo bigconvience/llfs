@@ -1589,12 +1589,12 @@ static void emit_text(Obj *prog) {
 
 void codegen(Obj *prog, FILE *out) {
   output_file = out;
-  output_file = fopen("./test2/asm.out", "w");
+  output_file = fopen("./test/asm.out", "w");
   File **files = get_input_files();
   for (int i = 0; files[i]; i++)
     println("  .file %d \"%s\"", files[i]->file_no, files[i]->name);
   const string filename = files[0]->name;
-  assign_lvar_offsets(prog);
+  // assign_lvar_offsets(prog);
   // emit_data(prog);
   // emit_text(prog);
 
