@@ -1,15 +1,31 @@
 #include "chibicc.h"
-#include <iostream>
 
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/IRBuilder.h"
+#include "llvm/IR/Verifier.h"
+#include "llvm/IR/GlobalValue.h"
+#include "llvm/IR/Constants.h"
+#include "llvm/ADT/SmallString.h"
+#include "llvm/ADT/StringRef.h"
+#include "llvm/IR/Instruction.h"
+
+#include <algorithm>
+#include <fstream>
+#include <iostream>
+#include <vector>
+#include <map>
 
 #define DUMP_OBJ 0
 
 static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
 static std::unique_ptr<llvm::IRBuilder<>> Builder;
+
+static bool isAnnonVar(std::string &name) {
+  int index = name.find(".L..");
+  return index == 0;
+}
 
 static void InitializeModule(const std::string &filename) {
   TheContext = std::make_unique<llvm::LLVMContext>();
@@ -155,6 +171,9 @@ static void emit_global_var(Obj *var) {
     return;
   }
   std::string var_name = var->name;
+  if (isAnnonVar(var_name)) {
+    return;
+  }
   llvm::Type *type = create_type(ty);
   TheModule->getOrInsertGlobal(var_name, type);
   llvm::GlobalVariable *gvar = TheModule->getNamedGlobal(var_name);
@@ -173,11 +192,89 @@ static void emit_data(Obj *prog) {
   emit_global_var(prog);
 }
 
+static llvm::Type *create_return_type(Type *return_ty) {
+  llvm::Type *retTy = create_type(return_ty);
+  return retTy;
+}
+
+static llvm::FunctionType * create_prototype(Obj *funcNode) {
+  std::vector<llvm::Type *> types;
+  Type *funcType = funcNode->ty;
+  for (Type *paramType = funcType->params; paramType; paramType = paramType->next) {
+    llvm::Type *type = create_type(paramType);
+    types.push_back(type);
+  }
+  llvm::Type *RetTy = create_return_type(funcType->return_ty);
+  bool isVarArg = funcType->is_variadic;
+  if (types.empty()) {
+    isVarArg = false;
+  }
+  llvm::FunctionType *functionType = llvm::FunctionType::get(RetTy, types, isVarArg);
+  return functionType;
+}
+
+
+static llvm::Function *declare_func(Obj *funcNode) {
+  assert(funcNode->ty->kind == TY_FUNC);
+
+  std::string funcName = funcNode->name;
+  llvm::FunctionType *funcType = create_prototype(funcNode);
+  llvm::GlobalValue::LinkageTypes linkageType = create_linkage_type(funcNode);
+  llvm::Function *func = llvm::Function::Create(funcType, linkageType, funcName, TheModule.get());
+
+  return func;
+}
+
+static void StartFunction(llvm::Function *Fn, Obj *funcNode) {
+  const char *name = Fn->getName().data();
+  llvm::BasicBlock *entry = llvm::BasicBlock::Create(getLLVMContext(), "", Fn);
+  Builder->SetInsertPoint(entry);
+
+}
+
+static void buildFunctionBody(llvm::Function *Func, Obj *funcNode) {
+
+}
+
+static void FinishFunction(llvm::Function *Func, Obj *funcNode) {
+
+  Builder->CreateRet(Builder->getInt32(-1024));
+}
+
+static void define_func(Obj *funcNode) {
+  llvm::Function *fooFunc = declare_func(funcNode);
+  // SetLLVMFunctionAttributes(fooFunc);
+  if (!funcNode->is_definition) {
+    return;
+  }
+  
+  StartFunction(fooFunc, funcNode);
+  buildFunctionBody(fooFunc, funcNode);
+  FinishFunction(fooFunc, funcNode);
+  llvm::verifyFunction(*fooFunc);
+}
+
+static void emit_function(Obj *fn) {
+  if (!fn) {
+    return;
+  }
+  emit_function(fn->next);
+  if(fn->ty->kind != TY_FUNC) {
+    return;
+  }
+  if (fn->is_definition) {
+    define_func(fn);
+  } else {
+    declare_func(fn);
+  }
+}
+
 void gen_ir(Obj *prog, const std::string &filename) {
   InitializeModule(filename);
   if (DUMP_OBJ) {
     dump_obj(prog);
   }
   emit_data(prog);
+  emit_function(prog);
   TheModule->print(llvm::outs(), nullptr);
 }
