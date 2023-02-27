@@ -16,6 +16,7 @@
 #include <vector>
 #include <map>
 
+
 #define DUMP_OBJ 0
 
 static std::unique_ptr<llvm::LLVMContext> TheContext;
@@ -171,17 +172,12 @@ static void emit_global_var(Obj *var) {
     return;
   }
   std::string var_name = var->name;
-  if (isAnnonVar(var_name)) {
-    return;
-  }
+
   llvm::Type *type = create_type(ty);
   TheModule->getOrInsertGlobal(var_name, type);
   llvm::GlobalVariable *gvar = TheModule->getNamedGlobal(var_name);
-  gvar->setAlignment(llvm::MaybeAlign(var->align));
-  gvar->setDSOLocal(!var->is_static);
   llvm::Constant *initializer = build_initializer(type, var);
   gvar->setInitializer(initializer);
-  gvar->setLinkage(create_linkage_type(var));
 }
 
 static void emit_data(Obj *prog) {
@@ -269,6 +265,7 @@ static void emit_function(Obj *fn) {
   }
 }
 
+
 void gen_ir(Obj *prog, const std::string &filename) {
   InitializeModule(filename);
   if (DUMP_OBJ) {
@@ -276,5 +273,6 @@ void gen_ir(Obj *prog, const std::string &filename) {
   }
   emit_data(prog);
   emit_function(prog);
+
   TheModule->print(llvm::outs(), nullptr);
 }
