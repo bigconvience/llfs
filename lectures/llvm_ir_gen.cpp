@@ -172,7 +172,9 @@ static void emit_global_var(Obj *var) {
     return;
   }
   std::string var_name = var->name;
-
+  if (isAnnonVar(var_name)) {
+    return;
+  }
   llvm::Type *type = create_type(ty);
   TheModule->getOrInsertGlobal(var_name, type);
   llvm::GlobalVariable *gvar = TheModule->getNamedGlobal(var_name);
@@ -193,22 +195,32 @@ static llvm::Type *create_return_type(Type *return_ty) {
   return retTy;
 }
 
-static llvm::FunctionType * create_prototype(Obj *funcNode) {
+static std::vector<llvm::Type *> create_params_type(Type *funcType) {
   std::vector<llvm::Type *> types;
-  Type *funcType = funcNode->ty;
   for (Type *paramType = funcType->params; paramType; paramType = paramType->next) {
     llvm::Type *type = create_type(paramType);
     types.push_back(type);
   }
+  return types;
+}
+
+static llvm::FunctionType * create_prototype(Obj *funcNode) {
+  assert(funcNode->ty->kind == TY_FUNC);
+  Type *funcType = funcNode->ty;
+
+  // create function input type
+  std::vector<llvm::Type *> types = create_params_type(funcType);
+  // create function output type
   llvm::Type *RetTy = create_return_type(funcType->return_ty);
+  // check is variable arg function
   bool isVarArg = funcType->is_variadic;
   if (types.empty()) {
     isVarArg = false;
   }
+  // get prototype
   llvm::FunctionType *functionType = llvm::FunctionType::get(RetTy, types, isVarArg);
   return functionType;
 }
-
 
 static llvm::Function *declare_func(Obj *funcNode) {
   assert(funcNode->ty->kind == TY_FUNC);
@@ -216,16 +228,16 @@ static llvm::Function *declare_func(Obj *funcNode) {
   std::string funcName = funcNode->name;
   llvm::FunctionType *funcType = create_prototype(funcNode);
   llvm::GlobalValue::LinkageTypes linkageType = create_linkage_type(funcNode);
+  // register function declaration
   llvm::Function *func = llvm::Function::Create(funcType, linkageType, funcName, TheModule.get());
-
   return func;
 }
 
 static void StartFunction(llvm::Function *Fn, Obj *funcNode) {
   const char *name = Fn->getName().data();
+  // create function init basicblock
   llvm::BasicBlock *entry = llvm::BasicBlock::Create(getLLVMContext(), "", Fn);
   Builder->SetInsertPoint(entry);
-
 }
 
 static void buildFunctionBody(llvm::Function *Func, Obj *funcNode) {
@@ -238,12 +250,9 @@ static void FinishFunction(llvm::Function *Func, Obj *funcNode) {
 }
 
 static void define_func(Obj *funcNode) {
-  llvm::Function *fooFunc = declare_func(funcNode);
-  // SetLLVMFunctionAttributes(fooFunc);
-  if (!funcNode->is_definition) {
-    return;
-  }
-  
+  assert(funcNode->is_definition);
+
+  llvm::Function *fooFunc = declare_func(funcNode);  
   StartFunction(fooFunc, funcNode);
   buildFunctionBody(fooFunc, funcNode);
   FinishFunction(fooFunc, funcNode);
