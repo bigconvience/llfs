@@ -34,6 +34,7 @@ typedef struct Node Node;
 typedef struct Member Member;
 typedef struct Relocation Relocation;
 typedef struct Hideset Hideset;
+typedef struct Initializer Initializer;
 
 //
 // strings.c
@@ -167,6 +168,10 @@ struct Obj {
 
   // constant data;
   bool is_constant_var;
+  // Local variable init
+  Initializer *init;
+  // scope_index
+  int scope_level;
 };
 
 // Global variable can be initialized either by a constant expression
@@ -417,6 +422,28 @@ struct Member {
   int bit_width;
 };
 
+// This struct represents a variable initializer. Since initializers
+// can be nested (e.g. `int x[2][2] = {{1, 2}, {3, 4}}`), this struct
+// is a tree data structure.
+struct Initializer {
+  Initializer *next;
+  Type *ty;
+  Token *tok;
+  bool is_flexible;
+
+  // If it's not an aggregate type and has an initializer,
+  // `expr` has an initialization expression.
+  Node *expr;
+
+  // If it's an initializer for an aggregate type (e.g. array or struct),
+  // `children` has initializers for its children.
+  Initializer **children;
+
+  // Only one member can be initialized for a union.
+  // `mem` is used to clarify which member is initialized.
+  Member *mem;
+};
+
 extern Type *ty_void;
 extern Type *ty_bool;
 
@@ -439,6 +466,7 @@ bool is_flonum(Type *ty);
 bool is_numeric(Type *ty);
 bool is_compatible(Type *t1, Type *t2);
 bool is_struct(Type *ty);
+bool is_compound_type(Type *ty);
 Type *copy_type(Type *ty);
 Type *pointer_to(Type *base);
 Type *func_type(Type *return_ty);
@@ -448,6 +476,7 @@ Type *enum_type(void);
 Type *struct_type(void);
 void add_type(Node *node);
 bool is_const_expr(Node *node);
+bool is_const_initializer(Initializer *init);
 
 //
 // codegen.c

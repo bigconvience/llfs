@@ -50,29 +50,6 @@ typedef struct {
   int align;
 } VarAttr;
 
-// This struct represents a variable initializer. Since initializers
-// can be nested (e.g. `int x[2][2] = {{1, 2}, {3, 4}}`), this struct
-// is a tree data structure.
-typedef struct Initializer Initializer;
-struct Initializer {
-  Initializer *next;
-  Type *ty;
-  Token *tok;
-  bool is_flexible;
-
-  // If it's not an aggregate type and has an initializer,
-  // `expr` has an initialization expression.
-  Node *expr;
-
-  // If it's an initializer for an aggregate type (e.g. array or struct),
-  // `children` has initializers for its children.
-  Initializer **children;
-
-  // Only one member can be initialized for a union.
-  // `mem` is used to clarify which member is initialized.
-  Member *mem;
-};
-
 // For local variable initializer.
 typedef struct InitDesg InitDesg;
 struct InitDesg {
@@ -322,6 +299,7 @@ static Obj *new_lvar(char *name, Type *ty) {
   Obj *var = new_var(name, ty);
   var->is_local = true;
   var->next = locals;
+  var->scope_level = scope_level;
   locals = var;
   return var;
 }
@@ -1447,8 +1425,14 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   // initializing it with user-supplied values.
   Node *lhs = new_node(ND_MEMZERO, tok);
   lhs->var = var;
+  lhs->var->init = init;
 
-  Node *rhs = create_lvar_init(init, var->ty, &desg, tok);
+  Node *rhs = nullptr;
+  if (is_compound_type(var->ty) && is_const_initializer(init)) {
+    rhs = new_node(ND_NULL_EXPR, tok);
+  } else {
+    rhs = create_lvar_init(init, var->ty, &desg, tok);
+  }
   return new_binary(ND_COMMA, lhs, rhs, tok);
 }
 
@@ -2026,6 +2010,23 @@ static int64_t eval_rval(Node *node, char ***label) {
   }
 
   error_tok(node->tok, "invalid initializer");
+}
+
+bool is_const_initializer(Initializer *init) {
+  if (!init) {
+    return false;
+  }
+  if (init->ty->kind == TY_STRUCT) {
+    for (Member *mem = init->ty->members; mem; mem = mem->next) {
+      Initializer *child = init->children[mem->idx];
+      if (!is_const_initializer(child)) {
+        return false;
+      }
+    }
+    return true;
+  }
+
+  return is_const_expr(init->expr);
 }
 
 bool is_const_expr(Node *node) {

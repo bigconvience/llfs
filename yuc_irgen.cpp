@@ -58,6 +58,10 @@ static llvm::Value *gen_number(Node *node);
 
 static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix);
 static llvm::Type *emit_pointer_type(Type *ctype);
+static int getMemberCount(Type *ctype);
+static llvm::StructType *ConvertRecordDeclType(Type *ctype);
+static llvm::Constant *gen_literal(Node *node);
+static llvm::GlobalValue::LinkageTypes yuc2LinkageType(Obj *yucNode);
 
 enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
 
@@ -334,8 +338,8 @@ static void leave_scope(void) {
 static std::string get_scope_name(Obj *var) {
   std::string var_name = var->name;
   if (var->is_local) {
-    int offset = var->offset;
-    var_name.append(std::to_string(offset));
+    int scope_level = var->scope_level;
+    var_name.append(std::to_string(scope_level));
   }
   return var_name;
 }
@@ -491,6 +495,16 @@ static bool isAnnonVar(std::string &name) {
   return index == 0;
 }
 
+static bool is_anony_tag(std::string &name) {
+   int index = name.find(".tag..");
+  return index == 0; 
+}
+
+static std::string get_tag_type_name(Token *tag) {
+  std::string tag_name = get_ident(tag);
+  return is_anony_tag(tag_name) ? "anon" : tag_name;
+}
+
 static llvm::Type *getPaddingType(int PadSize) {
   llvm::Type *Ty = Builder->getInt8Ty();
   if (PadSize > 1) {
@@ -587,6 +601,26 @@ static llvm::Value *gen_subscript(Node *node) {
   return load(node->ty, Addr); 
 }
 
+static llvm::Value *gen_var_addr(Obj *var) {
+  llvm::Value *Addr = nullptr;
+  std::string typeStr = ctypeKindString(var->ty->kind);
+  std::string varName = var->name;
+  output << buildSeperator(stmt_level + 1, "gen_var_addr type:" + typeStr)
+    << " " << var->ty->is_typedef
+    << " " << varName << std::endl;
+  if (var->is_static) {
+    Addr = TheModule->getNamedGlobal(varName);
+  } if (isAnnonVar(varName)) {
+    const std::string &Str = annonInitData[varName];
+    Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
+  } else if (var->is_local){
+    Addr = find_var(var);
+  } else {
+    Addr = TheModule->getNamedGlobal(varName);
+  }
+  return Addr;
+}
+
 static llvm::Value *gen_addr(Node *node) {
   int cur_level = ++stmt_level;
   llvm::Value *Addr = nullptr;
@@ -594,24 +628,8 @@ static llvm::Value *gen_addr(Node *node) {
   std::string kindStr = node_kind_info(kind);
   output << buildSeperator(cur_level, "gen_addr start:" + kindStr) << std::endl;
   switch(kind) {
-    case ND_VAR: {
-        Obj *var = node->var;
-        std::string typeStr = ctypeKindString(var->ty->kind);
-        std::string varName = var->name;
-        output << buildSeperator(cur_level + 1, "var type:" + typeStr)
-          << " " << var->ty->is_typedef
-          << " " << varName << std::endl;
-        if (var->is_static) {
-          Addr = TheModule->getNamedGlobal(varName);
-        } if (isAnnonVar(varName)) {
-          const std::string &Str = annonInitData[varName];
-          Addr = CGM().GetAddrOfConstantCString(Str, nullptr);
-        } else if (var->is_local){
-          Addr = find_var(var);
-        } else {
-          Addr = TheModule->getNamedGlobal(varName);
-        }
-      }
+    case ND_VAR:
+      Addr = gen_var_addr(node->var);
       break;
     case ND_MEMBER:
       Addr = gen_member_addr(node);
@@ -889,8 +907,10 @@ static llvm::Value *gen_sub(Node *node) {
     V = Builder->CreateSub(operandL, operandR);
     if (node->lhs->ty->base) {
       int typeSize = node->lhs->ty->base->size;
-      llvm::Value *SizeV = getOffset(typeSize);
-      V = Builder->CreateExactSDiv(V, SizeV);
+      if (typeSize != 1) {
+        llvm::Value *SizeV = getOffset(typeSize);
+        V = Builder->CreateExactSDiv(V, SizeV);    
+      }
     }
     return V;
   } else if (node->o_kind == PTR_NUM) {
@@ -1153,6 +1173,97 @@ static llvm::Value *emit_assign_struct(Node *node) {
   return addrR;
 }
 
+
+static llvm::Constant *gen_struct_literal(Obj *var) {
+  output << buildSeperator(stmt_level, "gen_struct_literal start:") 
+      << std::endl;
+
+  Type *var_type = var->ty;
+  llvm::StructType *Ty = ConvertRecordDeclType(var_type);
+
+  llvm::SmallVector<llvm::Constant *, 16> Elements;
+  unsigned NumElements = getMemberCount(var_type);
+  Elements.reserve(NumElements);
+
+  Initializer *init = var->init;
+  int index = 0; 
+  for (Member *member = var_type->members; member; member = member->next) {
+    Initializer *child = init->children[member->idx];
+    llvm::Constant *child_value = gen_literal(child->expr);
+    Elements.push_back(child_value);
+  }
+
+  return llvm::ConstantStruct::get(Ty, Elements);
+}
+
+static llvm::Constant *gen_literal(Node *node) {
+  Obj *var = node->var;
+  if (!var) {
+    return static_cast<llvm::Constant *>(gen_expr(node));
+  }
+
+  Type *var_type = var->ty;
+  output << buildSeperator(stmt_level, "gen_literal start:") 
+      << " is_struct: " << is_struct(var->ty)
+      << std::endl;
+
+  if (is_struct(var_type)) {
+    return gen_struct_literal(var);
+  }
+  return static_cast<llvm::Constant *>(gen_expr(var->init->expr));
+}
+
+static llvm::GlobalVariable *gen_const_variable(Obj *var, llvm::Constant *initializer) {
+  std::string var_name = var->name;
+  llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
+  std::string function_name =  TheFunction->getName().data();
+  std::string name = "__const." + function_name + "." +var_name;
+  Type *ctype = var->ty;
+
+  unsigned AddrSpace = 0;
+  llvm::Module &M = CGM().getModule();
+  // Create a global variable for this struct
+  llvm::GlobalValue::LinkageTypes linkage_type = llvm::GlobalValue::PrivateLinkage;
+  auto *gVar = new llvm::GlobalVariable(
+      M, 
+      initializer->getType(), 
+      true,
+      linkage_type, 
+      initializer, 
+      name,
+      nullptr, 
+      llvm::GlobalVariable::NotThreadLocal, 
+      AddrSpace);
+
+  gVar->setAlignment(llvm::MaybeAlign(ctype->align));
+  gVar->setUnnamedAddr(llvm::GlobalValue::UnnamedAddr::Global);
+  return gVar;
+}
+
+static llvm::Value *gen_memzero(Node *node) {
+  llvm::Constant *operandR = nullptr;
+  Obj *var = node->var;
+  if (!var) {
+    return operandR;
+  }
+  if (!is_const_initializer(var->init) || !is_struct(var->ty)) {
+    return operandR;
+  }
+  output << buildSeperator(stmt_level, "gen_memzero start:") 
+      << " is_struct: " << is_struct(var->ty)
+      << " is_const_init: " << is_const_initializer(var->init)
+      << std::endl;
+  operandR = gen_literal(node);
+  llvm::GlobalVariable * global_var = gen_const_variable(var, operandR);
+
+  llvm::Value *operandL = gen_var_addr(var);
+  operandL = uniform_address(operandL);
+
+  llvm::Value *dest = emit_memcpy(operandL, global_var, var->ty);
+
+  return dest;
+}
+
 static llvm::Value *gen_assign(Node *node) {
   Node *lhs = node->lhs;
   output << buildSeperator(stmt_level, "gen_assign start:") 
@@ -1320,18 +1431,9 @@ static llvm::Value *gen_expr(Node *node) {
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
   Type* nodeType = node->ty;
-  std::string typeStr = nodeType ? ctypeKindString(nodeType->kind) : "";
+  std::string typeStr = nodeType ? ctypeKindString(nodeType->kind) : "unknow type";
   output << buildSeperator(cur_level, "gen_expr start, kind:" + kindStr + " type:" + typeStr) << std::endl; 
   llvm::Value *V = nullptr;
-  if (nodeType == nullptr) {
-    --stmt_level;
-    return V;
-  }
-  if (kind == ND_NULL_EXPR) {
-    --stmt_level;
-    return V;
-  }
-
   cur_level++;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
@@ -1366,7 +1468,7 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_neg(node);
       break;
     case ND_MEMZERO:
-      output << buildSeperator(cur_level, "ND_MEMZERO:") << node->kind << std::endl;
+      V = gen_memzero(node);
       break;
     case ND_VAR:
       V = gen_var(node);
@@ -1764,7 +1866,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   int DesiredSize = ctype->size;
   Token *tag = ctype->tag;
   // tag
-  llvm::StringRef suffix = get_ident(tag);
+  llvm::StringRef suffix = get_tag_type_name(tag).c_str();
   output << "yuc2StructType DesiredSize:" << DesiredSize 
         << " is_typedef:" << ctype->is_typedef
         << " tag: " << suffix.data()
@@ -1795,8 +1897,16 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   addRecordTypeName(ctype, type, suffix);
   push_tag_scope(ctype, type);
 
+  int index = 0;
   for (Member *member = ctype->members; member; member = member->next) {
     Types.push_back(yuc2LLVMType(member->ty));
+    member->idx = index++;
+    int PadSize = member->align - member->ty->size;
+    if (PadSize > 0) {
+      llvm::Type *paddingType = getPaddingType(PadSize);
+      Types.push_back(paddingType);
+      index++;
+    }
   }
   type->setBody(Types);
   output << "isLiteral: " << type->isLiteral() << std::endl;
