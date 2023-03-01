@@ -50,29 +50,6 @@ typedef struct {
   int align;
 } VarAttr;
 
-// This struct represents a variable initializer. Since initializers
-// can be nested (e.g. `int x[2][2] = {{1, 2}, {3, 4}}`), this struct
-// is a tree data structure.
-typedef struct Initializer Initializer;
-struct Initializer {
-  Initializer *next;
-  Type *ty;
-  Token *tok;
-  bool is_flexible;
-
-  // If it's not an aggregate type and has an initializer,
-  // `expr` has an initialization expression.
-  Node *expr;
-
-  // If it's an initializer for an aggregate type (e.g. array or struct),
-  // `children` has initializers for its children.
-  Initializer **children;
-
-  // Only one member can be initialized for a union.
-  // `mem` is used to clarify which member is initialized.
-  Member *mem;
-};
-
 // For local variable initializer.
 typedef struct InitDesg InitDesg;
 struct InitDesg {
@@ -168,10 +145,10 @@ static int align_down(int n, int align) {
 }
 
 static void enter_scope(void) {
+  scope_level++;
   Scope *sc = new Scope();
   sc->next = scope;
   scope = sc;
-  scope_level++;
 }
 
 static void leave_scope(void) {
@@ -272,7 +249,6 @@ static VarScope *push_scope(char *name) {
 static Initializer *new_initializer(Type *ty, bool is_flexible) {
   Initializer *init = new Initializer();
   init->ty = ty;
-
   if (ty->kind == TY_ARRAY) {
     if (is_flexible && ty->size < 0) {
       init->is_flexible = true;
@@ -322,6 +298,7 @@ static Obj *new_lvar(char *name, Type *ty) {
   Obj *var = new_var(name, ty);
   var->is_local = true;
   var->next = locals;
+  var->scope_level = scope_level;
   locals = var;
   return var;
 }
@@ -343,6 +320,25 @@ static char *new_unique_name(void) {
 static char *new_stmt_expr_name(void) {
   static int id = 0;
   return format(".stmt..%d", id++);
+}
+
+static char *new_struct_shadow_name(void) {
+  static int id = 0;
+  return format(".struct..%d", id++);
+}
+
+static char *new_tag_name(void) {
+  static int id = 0;
+  return format(".tag..%d", id++);
+}
+
+static Token *new_token_tag() {
+  char *tag_name = new_tag_name();
+  Token *tag = new Token();
+  tag->kind = TK_IDENT;
+  tag->loc = tag_name;
+  tag->len = strlen(tag_name);
+  return tag;
 }
 
 static Obj *new_anon_gvar(Type *ty) {
@@ -371,8 +367,6 @@ static Type *find_typedef(Token *tok) {
 }
 
 static void push_tag_scope(Token *tok, Type *ty) {
-  ty->scope_level = scope_level;
-  ty->tag = tok;
   hashmap_put2(&scope->tags, tok->loc, tok->len, ty);
 }
 
@@ -777,11 +771,12 @@ static bool consume_end(Token **rest, Token *tok) {
 // enum-list      = ident ("=" num)? ("," ident ("=" num)?)* ","?
 static Type *enum_specifier(Token **rest, Token *tok) {
   Type *ty = enum_type();
-
+  ty->scope_level = scope_level;
   // Read a struct tag.
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
     tag = tok;
+    ty->tag = tag;
     tok = tok->next;
   }
 
@@ -793,6 +788,9 @@ static Type *enum_specifier(Token **rest, Token *tok) {
       error_tok(tag, "not an enum tag");
     *rest = tok;
     return ty;
+  }
+  if (!tag) {
+    ty->tag = new_token_tag();
   }
 
   tok = skip(tok, "{");
@@ -1426,8 +1424,14 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   // initializing it with user-supplied values.
   Node *lhs = new_node(ND_MEMZERO, tok);
   lhs->var = var;
+  lhs->var->init = init;
+  Node *rhs = nullptr;
+  if (is_compound_type(var->ty) && is_const_initializer(init)) {
+    rhs = new_node(ND_NULL_EXPR, tok);
+  } else {
+    rhs = create_lvar_init(init, var->ty, &desg, tok);
+  }
 
-  Node *rhs = create_lvar_init(init, var->ty, &desg, tok);
   return new_binary(ND_COMMA, lhs, rhs, tok);
 }
 
@@ -2007,7 +2011,36 @@ static int64_t eval_rval(Node *node, char ***label) {
   error_tok(node->tok, "invalid initializer");
 }
 
+bool is_const_initializer(Initializer *init) {
+  if (!init) {
+    return true;
+  }
+
+  Type *ty = init->ty;
+  if (ty->kind == TY_STRUCT) {
+    for (Member *mem = init->ty->members; mem; mem = mem->next) {
+      Initializer *child = init->children[mem->idx];
+      if (!is_const_initializer(child)) {
+        return false;
+      }
+    }
+    return true;
+  } else if (ty->kind == TY_ARRAY) {
+    for (int i = 0; i < ty->array_len; i++) {
+      Initializer *child = init->children[i];
+      if (!is_const_initializer(child)) {
+        return false;
+      }
+    }
+  }
+
+  return is_const_expr(init->expr);
+}
+
 bool is_const_expr(Node *node) {
+  if (!node) {
+    return false;
+  }
   add_type(node);
 
   switch (node->kind) {
@@ -2716,18 +2749,19 @@ static Token *attribute_list(Token *tok, Type *ty) {
 // struct-union-decl = attribute? ident? ("{" struct-members)?
 static Type *struct_union_decl(Token **rest, Token *tok) {
   Type *ty = struct_type();
+  ty->scope_level = scope_level;
   tok = attribute_list(tok, ty);
 
   // Read a tag.
   Token *tag = NULL;
   if (tok->kind == TK_IDENT) {
     tag = tok;
+    ty->tag = tag;
     tok = tok->next;
   }
 
   if (tag && !equal(tok, "{")) {
     *rest = tok;
-
     Type *ty2 = find_tag(tag);
     if (ty2)
       return ty2;
@@ -2735,6 +2769,10 @@ static Type *struct_union_decl(Token **rest, Token *tok) {
     ty->size = -1;
     push_tag_scope(tag, ty);
     return ty;
+  }
+
+  if (!tag) {
+    ty->tag = new_token_tag();
   }
 
   tok = skip(tok, "{");
@@ -2864,7 +2902,10 @@ static Node *struct_ref(Node *node, Token *tok) {
     error_tok(node->tok, "not a struct nor a union");
 
   Type *ty = node->ty;
-
+  if (node->kind != ND_VAR && node->kind != ND_MEMBER) {
+    Obj *shadow = new_lvar(new_struct_shadow_name(), node->ty);
+    node = new_binary(ND_ASSIGN, new_var_node(shadow, tok), node, tok);
+  }
   for (;;) {
     Member *mem = get_struct_member(ty, tok);
     if (!mem)

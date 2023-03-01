@@ -51,6 +51,18 @@ bool is_numeric(Type *ty) {
   return is_integer(ty) || is_flonum(ty);
 }
 
+bool is_struct(Type *ty) {
+  return ty->kind == TY_STRUCT;
+}
+
+bool is_compound_type(Type *ty) {
+  if (!ty) {
+    return false;
+  }
+  return ty->kind == TY_ARRAY || ty->kind == TY_STRUCT || 
+         ty->kind == TY_UNION;
+}
+
 bool is_compatible(Type *t1, Type *t2) {
   if (t1 == t2)
     return true;

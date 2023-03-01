@@ -38,6 +38,63 @@ static llvm::LLVMContext &getLLVMContext() {
   return TheModule->getContext();
 }
 
+typedef struct BlockScope {
+  BlockScope *next;
+
+  std::map<std::string, llvm::Value *> vars;
+  std::map<std::string, llvm::StructType *> tags;
+  std::map<std::string, llvm::Value *> constants;
+} BlockScope;
+
+static BlockScope *scope = new BlockScope();
+
+static void enter_scope(void) {
+  BlockScope *sc = new BlockScope();
+  sc->next = scope;
+  scope = sc;
+}
+
+static void leave_scope(void) {
+  scope = scope->next;
+}
+
+static std::string get_scope_name(Obj *var) {
+  std::string var_name = var->name;
+  if (var->is_local) {
+    int scope_level = var->scope_level;
+    var_name.append("..");
+    var_name.append(std::to_string(scope_level));
+  }
+  return var_name;
+}
+
+static void push_var(Obj *var, llvm::Value *v) {
+  std::string var_name = get_scope_name(var);
+  scope->vars[var_name] = v;
+}
+
+static llvm::Value *find_var(Obj *var) {
+  std::string var_name = get_scope_name(var);
+  for (BlockScope *sc = scope; sc; sc = sc->next) {
+    llvm::Value *v = sc->vars[var_name];
+    if (v) {
+      return v;
+    }
+  }
+  return nullptr;
+}
+
+static int get_align(Obj *var) {
+  int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
+      ? MAX(16, var->align) : var->align;
+  return align;
+}
+
+static bool is_builtin_name(std::string &name) {
+  return name == "__alloca_size__" 
+      || name == "__va_area__";
+}
+
 static void print_type(Type *type) {
   if (!type) {
     return;
@@ -66,6 +123,9 @@ static void dump_obj(Obj *obj) {
 static llvm::Type *create_type(Type *ty) {
   llvm::Type *type;
   switch(ty->kind) {
+  case TY_BOOL:
+    type = Builder->getInt8Ty();
+    break;
   case TY_CHAR:
     type = Builder->getInt8Ty();
     break;
@@ -233,18 +293,86 @@ static llvm::Function *declare_func(Obj *funcNode) {
   return func;
 }
 
-static void StartFunction(llvm::Function *Fn, Obj *funcNode) {
+static void alloca_local_var(Obj *local) {
+  if (!local) {
+    return;
+  }
+  std::string varName = local->name;
+  Type *ty = local->ty;
+  Obj *var = local;
+  int align = get_align(var);
+  llvm::Type *localType = create_type(ty);
+  llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
+  localAddr->setAlignment(llvm::Align(align));
+  push_var(local, localAddr);
+}
+
+
+static void alloca_params(Obj *func) {
+  if (!func) {
+    return;
+  }
+  for (Obj *param = func->params; param; param = param->next) {
+    alloca_local_var(param);
+  }  
+}
+
+static void alloca_local_vars(Obj *func) {
+  std::vector<Obj *> locals;
+  for (Obj *local = func->locals; local; local = local->next) {
+    std::string var_name = local->name;
+    if (is_builtin_name(var_name)) {
+      break;
+    }
+    locals.push_back(local);
+  }
+
+  for (std::vector<Obj *>::reverse_iterator iter = locals.rbegin();
+    iter != locals.rend(); iter++) {
+    Obj *local = (*iter);
+    llvm::Value *local_value = find_var(local);
+    if (local_value) {
+      continue;
+    }
+    alloca_local_var(local);
+  }
+}
+
+static void store_args(llvm::Function *Func, Obj *func) {
+   // store args
+  Obj *param = func->params;
+  llvm::Function::arg_iterator AI, AE;
+  for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI, param = param->next) {
+    llvm::Value *arg_addr = find_var(param);
+    TypeKind typeKind = param->ty->kind;
+    llvm::Value *fnArg = AI;
+    if (typeKind == TY_BOOL) {
+      fnArg = Builder->CreateZExt(AI, Builder->getInt8Ty());
+    }
+    Builder->CreateStore(fnArg, arg_addr);
+  } 
+}
+
+static void prepare_args_and_locals(llvm::Function *Func, Obj *funcNode) {
+  alloca_params(funcNode);
+  alloca_local_vars(funcNode);
+  store_args(Func, funcNode);
+}
+
+static void start_function(llvm::Function *Fn, Obj *funcNode) {
   const char *name = Fn->getName().data();
   // create function init basicblock
   llvm::BasicBlock *entry = llvm::BasicBlock::Create(getLLVMContext(), "", Fn);
   Builder->SetInsertPoint(entry);
+
+  prepare_args_and_locals(Fn, funcNode);
 }
 
-static void buildFunctionBody(llvm::Function *Func, Obj *funcNode) {
+static void build_function_body(llvm::Function *Func, Obj *funcNode) {
 
 }
 
-static void FinishFunction(llvm::Function *Func, Obj *funcNode) {
+static void finish_function(llvm::Function *Func, Obj *funcNode) {
 
   Builder->CreateRet(Builder->getInt32(-1024));
 }
@@ -253,9 +381,9 @@ static void define_func(Obj *funcNode) {
   assert(funcNode->is_definition);
 
   llvm::Function *fooFunc = declare_func(funcNode);  
-  StartFunction(fooFunc, funcNode);
-  buildFunctionBody(fooFunc, funcNode);
-  FinishFunction(fooFunc, funcNode);
+  start_function(fooFunc, funcNode);
+  build_function_body(fooFunc, funcNode);
+  finish_function(fooFunc, funcNode);
   llvm::verifyFunction(*fooFunc);
 }
 
