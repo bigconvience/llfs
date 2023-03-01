@@ -339,8 +339,10 @@ static std::string get_scope_name(Obj *var) {
   std::string var_name = var->name;
   if (var->is_local) {
     int scope_level = var->scope_level;
+    var_name.append("..");
     var_name.append(std::to_string(scope_level));
   }
+  output << "get_scope_name:" << var_name << std::endl;
   return var_name;
 }
 
@@ -2457,63 +2459,82 @@ static void FinishFunction(llvm::Function *Func, Obj *funcNode) {
   clearScopeVars();
 }
 
-static void prepareLocals(llvm::Function *Func, Obj *funcNode) {
+static bool is_builtin_name(std::string &name) {
+  return name == "__alloca_size__" 
+      || name == "__va_area__";
+}
+
+static void alloca_local_var(Obj *local) {
+    output << "alloca_local_var: " << std::endl;
+    if (!local) {
+      return;
+    }
+    std::string varName = local->name;
+    Type *ty = local->ty;
+    Obj *var = local;
+    int align = get_align(var);
+    llvm::Type *localType = getTypeForArg(ty);
+    llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
+    localAddr->setAlignment(llvm::Align(align));
+    push_var(local, localAddr);
+}
+
+static void alloca_params(Obj *func) {
+  output << "alloca_params: " << std::endl;
+  if (!func) {
+    return;
+  }
+  for (Obj *param = func->params; param; param = param->next) {
+    alloca_local_var(param);
+  }  
+}
+
+static void alloca_local_vars(Obj *func) {
+  output << "alloca_local_vars: " << std::endl;
+  std::vector<Obj *> locals;
+  for (Obj *local = func->locals; local; local = local->next) {
+    std::string var_name = local->name;
+    if (is_builtin_name(var_name)) {
+      break;
+    }
+    locals.push_back(local);
+  }
+
+  for (std::vector<Obj *>::reverse_iterator iter = locals.rbegin();
+    iter != locals.rend(); iter++) {
+    Obj *local = (*iter);
+    llvm::Value *local_value = find_var(local);
+    if (local_value) {
+      continue;
+    }
+    alloca_local_var(local);
+  }
+}
+
+static void store_args(llvm::Function *Func, Obj *func) {
+   // store args
+  Obj *param = func->params;
+  llvm::Function::arg_iterator AI, AE;
+  for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI, param = param->next) {
+    llvm::Value *arg_addr = find_var(param);
+    TypeKind typeKind = param->ty->kind;
+    llvm::Value *fnArg = AI;
+    if (typeKind == TY_BOOL) {
+      fnArg = Builder->CreateZExt(AI, Builder->getInt8Ty());
+    }
+    Builder->CreateStore(fnArg, arg_addr);
+  } 
+}
+
+static void prepare_args_and_locals(llvm::Function *Func, Obj *funcNode) {
   if (funcNode->retCount > 1) {
     llvm::Type *returnType = Func->getReturnType();
     allocatedRetValue = Builder->CreateAlloca(returnType, nullptr);
   }
 
-  std::vector<Obj *> locals;
-   for (Obj *local = funcNode->locals; local; local = local->next) {
-    output << "start local name: " << local->name << std::endl;
-    locals.push_back(local);
-  }
-  reverse(locals.begin(), locals.end());
-
-  for (std::vector<Obj *>::iterator iter = locals.begin();
-    iter != locals.end(); iter++) {
-    Obj *local = (*iter);
-    std::string varName = local->name;
-    Type *ty = local->ty;
-    Obj *var = local;
-    int align = get_align(var);
-    output << "local name: " << varName
-      << " align " << align
-      << " offset " << local->offset << std::endl;
-    if (varName == "__alloca_size__" 
-      || varName == "__va_area__") {
-      continue;
-    }
-    llvm::Type *localType = getTypeForArg(ty);
-    llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
-    localAddr->setAlignment(llvm::Align(align));
-    push_var(local, localAddr);
-  }
-
-  // reverse args
-  std::vector<Obj *> args;
-  for (Obj *param = funcNode->params; param; param = param->next) {
-    output << "param name: " << param->name << std::endl;
-    args.push_back(param);
-  }
-  // reverse(args.begin(), args.end());
-
-  // store args
-  std::vector<Obj *>::iterator arg_iter = args.begin();
-  llvm::Function::arg_iterator AI, AE;
-  for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI, arg_iter++) {
-    Obj *arg = (*arg_iter);
-    std::string varName = arg->name;
-    output << "arg name: " << varName
-      << " offset " << arg->offset << std::endl;
-    llvm::Value *argAddr = find_var(arg);
-    TypeKind typeKind = arg->ty->kind;
-    llvm::Value *fnArg = AI;
-    if (typeKind == TY_BOOL) {
-      fnArg = Builder->CreateZExt(AI, Builder->getInt8Ty());
-    }
-    Builder->CreateStore(fnArg, argAddr);
-  }
+  alloca_params(funcNode);
+  alloca_local_vars(funcNode);
+  store_args(Func, funcNode);
 
   if (funcNode->ty->return_ty->kind == TY_STRUCT) {
     llvm::Type *returnType = Func->getReturnType();
@@ -2533,7 +2554,7 @@ static void StartFunction(llvm::Function *Fn, Obj *funcNode) {
   if (!strcmp(name, "main")) {
     defaultAlloca = CreateMainEntryBlockAlloca(Fn, "");
   }
-  prepareLocals(Fn, funcNode);
+  prepare_args_and_locals(Fn, funcNode);
 
   if (defaultAlloca) {
     Builder->CreateStore(Builder->getInt32(0), defaultAlloca);
