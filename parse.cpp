@@ -249,7 +249,6 @@ static VarScope *push_scope(char *name) {
 static Initializer *new_initializer(Type *ty, bool is_flexible) {
   Initializer *init = new Initializer();
   init->ty = ty;
-
   if (ty->kind == TY_ARRAY) {
     if (is_flexible && ty->size < 0) {
       init->is_flexible = true;
@@ -1426,13 +1425,13 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   Node *lhs = new_node(ND_MEMZERO, tok);
   lhs->var = var;
   lhs->var->init = init;
-
   Node *rhs = nullptr;
   if (is_compound_type(var->ty) && is_const_initializer(init)) {
     rhs = new_node(ND_NULL_EXPR, tok);
   } else {
     rhs = create_lvar_init(init, var->ty, &desg, tok);
   }
+
   return new_binary(ND_COMMA, lhs, rhs, tok);
 }
 
@@ -2014,9 +2013,11 @@ static int64_t eval_rval(Node *node, char ***label) {
 
 bool is_const_initializer(Initializer *init) {
   if (!init) {
-    return false;
+    return true;
   }
-  if (init->ty->kind == TY_STRUCT) {
+
+  Type *ty = init->ty;
+  if (ty->kind == TY_STRUCT) {
     for (Member *mem = init->ty->members; mem; mem = mem->next) {
       Initializer *child = init->children[mem->idx];
       if (!is_const_initializer(child)) {
@@ -2024,12 +2025,22 @@ bool is_const_initializer(Initializer *init) {
       }
     }
     return true;
+  } else if (ty->kind == TY_ARRAY) {
+    for (int i = 0; i < ty->array_len; i++) {
+      Initializer *child = init->children[i];
+      if (!is_const_initializer(child)) {
+        return false;
+      }
+    }
   }
 
   return is_const_expr(init->expr);
 }
 
 bool is_const_expr(Node *node) {
+  if (!node) {
+    return false;
+  }
   add_type(node);
 
   switch (node->kind) {

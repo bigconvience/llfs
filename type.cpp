@@ -56,6 +56,9 @@ bool is_struct(Type *ty) {
 }
 
 bool is_compound_type(Type *ty) {
+  if (!ty) {
+    return false;
+  }
   return ty->kind == TY_ARRAY || ty->kind == TY_STRUCT || 
          ty->kind == TY_UNION;
 }
