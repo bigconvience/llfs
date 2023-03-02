@@ -307,7 +307,6 @@ static void alloca_local_var(Obj *local) {
   push_var(local, localAddr);
 }
 
-
 static void alloca_params(Obj *func) {
   if (!func) {
     return;
@@ -379,12 +378,13 @@ static void finish_function(llvm::Function *Func, Obj *funcNode) {
 
 static void define_func(Obj *funcNode) {
   assert(funcNode->is_definition);
-
+  enter_scope();
   llvm::Function *fooFunc = declare_func(funcNode);  
   start_function(fooFunc, funcNode);
   build_function_body(fooFunc, funcNode);
   finish_function(fooFunc, funcNode);
   llvm::verifyFunction(*fooFunc);
+  leave_scope();
 }
 
 static void emit_function(Obj *fn) {
