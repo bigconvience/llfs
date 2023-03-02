@@ -2465,18 +2465,18 @@ static bool is_builtin_name(std::string &name) {
 }
 
 static void alloca_local_var(Obj *local) {
-    output << "alloca_local_var: " << std::endl;
-    if (!local) {
-      return;
-    }
-    std::string varName = local->name;
-    Type *ty = local->ty;
-    Obj *var = local;
-    int align = get_align(var);
-    llvm::Type *localType = getTypeForArg(ty);
-    llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
-    localAddr->setAlignment(llvm::Align(align));
-    push_var(local, localAddr);
+  output << "alloca_local_var: " << std::endl;
+  if (!local) {
+    return;
+  }
+  std::string varName = local->name;
+  Type *ty = local->ty;
+  Obj *var = local;
+  int align = get_align(var);
+  llvm::Type *localType = getTypeForArg(ty);
+  llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
+  localAddr->setAlignment(llvm::Align(align));
+  push_var(local, localAddr);
 }
 
 static void alloca_params(Obj *func) {

@@ -297,65 +297,67 @@ static void alloca_local_var(Obj *local) {
   if (!local) {
     return;
   }
-  std::string varName = local->name;
-  Type *ty = local->ty;
-  Obj *var = local;
-  int align = get_align(var);
-  llvm::Type *localType = create_type(ty);
+
+  llvm::Type *localType = create_type(local->ty);
   llvm::AllocaInst *localAddr = Builder->CreateAlloca(localType, nullptr);
+  int align = get_align(local);
   localAddr->setAlignment(llvm::Align(align));
   push_var(local, localAddr);
 }
 
-
-static void alloca_params(Obj *func) {
-  if (!func) {
-    return;
-  }
-  for (Obj *param = func->params; param; param = param->next) {
+static void alloca_params(Obj *param) {
+  while(param) {
     alloca_local_var(param);
-  }  
+    param = param->next;
+  }
 }
 
-static void alloca_local_vars(Obj *func) {
-  std::vector<Obj *> locals;
-  for (Obj *local = func->locals; local; local = local->next) {
-    std::string var_name = local->name;
-    if (is_builtin_name(var_name)) {
-      break;
-    }
-    locals.push_back(local);
+static void alloca_local_vars(Obj *local) {
+  if(!local) {
+    return;
   }
 
-  for (std::vector<Obj *>::reverse_iterator iter = locals.rbegin();
-    iter != locals.rend(); iter++) {
-    Obj *local = (*iter);
-    llvm::Value *local_value = find_var(local);
-    if (local_value) {
-      continue;
-    }
-    alloca_local_var(local);
+  alloca_local_vars(local->next);
+
+  std::string var_name = local->name;
+  if (is_builtin_name(var_name)) {
+    return;
   }
+
+  llvm::Value *local_value = find_var(local);
+  if (local_value) {
+    return;
+  }
+  alloca_local_var(local);
 }
 
 static void store_args(llvm::Function *Func, Obj *func) {
-   // store args
+  // 获取形参地址
   Obj *param = func->params;
-  llvm::Function::arg_iterator AI, AE;
-  for(AI = Func->arg_begin(), AE = Func->arg_end(); AI != AE; ++AI, param = param->next) {
+  // for循环获取实参对应的llvm::Value,store到栈空间中
+  for(llvm::Function::arg_iterator AI = Func->arg_begin(); 
+      AI != Func->arg_end(); ++AI, param = param->next) {
+    // 获取实参在栈上分配的地址
     llvm::Value *arg_addr = find_var(param);
-    TypeKind typeKind = param->ty->kind;
+    // 获取实参对应的llvm::Value
     llvm::Value *fnArg = AI;
+    TypeKind typeKind = param->ty->kind;
+    // 对bool值进行特殊处理
     if (typeKind == TY_BOOL) {
       fnArg = Builder->CreateZExt(AI, Builder->getInt8Ty());
     }
+    // store value
     Builder->CreateStore(fnArg, arg_addr);
   } 
 }
 
+// 定义prepare_args_and_locals，实现函数参数和局部变量的栈空间分配操作
 static void prepare_args_and_locals(llvm::Function *Func, Obj *funcNode) {
-  alloca_params(funcNode);
-  alloca_local_vars(funcNode);
+  // 栈上分配参数
+  alloca_params(funcNode->params);
+  // 栈上分配局部变量
+  alloca_local_vars(funcNode->locals);
+  // 存储实参
   store_args(Func, funcNode);
 }
 
@@ -364,7 +366,7 @@ static void start_function(llvm::Function *Fn, Obj *funcNode) {
   // create function init basicblock
   llvm::BasicBlock *entry = llvm::BasicBlock::Create(getLLVMContext(), "", Fn);
   Builder->SetInsertPoint(entry);
-
+  // 栈上分配实参和局部变量
   prepare_args_and_locals(Fn, funcNode);
 }
 
@@ -379,12 +381,13 @@ static void finish_function(llvm::Function *Func, Obj *funcNode) {
 
 static void define_func(Obj *funcNode) {
   assert(funcNode->is_definition);
-
+  enter_scope();
   llvm::Function *fooFunc = declare_func(funcNode);  
   start_function(fooFunc, funcNode);
   build_function_body(fooFunc, funcNode);
   finish_function(fooFunc, funcNode);
   llvm::verifyFunction(*fooFunc);
+  leave_scope();
 }
 
 static void emit_function(Obj *fn) {
