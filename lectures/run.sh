@@ -1,3 +1,3 @@
 #! /bin/bash
 
-./chibicc -S ./test/hello.c
+./chibicc -S ./test/test.c > ./test/test.ll

@@ -222,12 +222,12 @@ typedef enum {
   ND_SWITCH,    // "switch" 30
   ND_CASE,      // "case"
   ND_BLOCK,     // { ... }
+  ND_BLOCK_ITEM, // declaration or statement
   ND_GOTO,      // "goto"
   ND_GOTO_EXPR, // "goto" labels-as-values
   ND_LABEL,     // Labeled statement
   ND_LABEL_VAL, // [GNU] Labels-as-values
   ND_FUNCALL,   // Function call
-  ND_COMPOUND_STMT,// Compound stmt
   ND_EXPR_STMT, // Expression statement
   ND_STMT_EXPR, // Statement expression
   ND_VAR,       // Variable 40
@@ -670,8 +670,8 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_LABEL_VAL";
     case ND_FUNCALL:
       return "ND_FUNCALL";
-    case ND_COMPOUND_STMT:
-      return "ND_COMPOUND_STMT";
+    case ND_BLOCK_ITEM:
+      return "ND_BLOCK_ITEM";
     case ND_EXPR_STMT:
       return "ND_EXPR_STMT";
     case ND_STMT_EXPR:

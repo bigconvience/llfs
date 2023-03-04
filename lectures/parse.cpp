@@ -943,7 +943,7 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
       error_tok(ty->name, "variable declared void");
   }
 
-  Node *node = new_node(ND_BLOCK, tok);
+  Node *node = new_node(ND_BLOCK_ITEM, tok);
   node->body = head.next;
   *rest = tok->next;
   return node;
@@ -1813,7 +1813,7 @@ static Node *stmt(Token **rest, Token *tok) {
 
 // compound-stmt = (typedef | declaration | stmt)* "}"
 static Node *compound_stmt(Token **rest, Token *tok) {
-  Node *node = new_node(ND_COMPOUND_STMT, tok);
+  Node *node = new_node(ND_BLOCK, tok);
   Node head = {};
   Node *cur = &head;
 
@@ -1857,7 +1857,7 @@ static Node *compound_stmt(Token **rest, Token *tok) {
 static Node *expr_stmt(Token **rest, Token *tok) {
   if (equal(tok, ";")) {
     *rest = tok->next;
-    return new_node(ND_BLOCK, tok);
+    return new_node(ND_BLOCK_ITEM, tok);
   }
 
   Node *node = new_node(ND_EXPR_STMT, tok);
@@ -2203,7 +2203,7 @@ static Node *to_assign(Node *binary) {
                                        new_var_node(val, tok), tok),
                             tok);
 
-    loop->then = new_node(ND_BLOCK, tok);
+    loop->then = new_node(ND_BLOCK_ITEM, tok);
     loop->then->body = new_unary(ND_EXPR_STMT, body, tok);
 
     Node *cas = new_node(ND_CAS, tok);

@@ -16,8 +16,15 @@
 #include <vector>
 #include <map>
 
-
 #define DUMP_OBJ 0
+
+static void gen_stmt(Node *node);
+static void gen_block(Node *node);
+static void gen_block_item(Node *node);
+
+static llvm::Value *gen_expr(Node *node);
+static llvm::Value *gen_add(Node *node);
+static llvm::Value *gen_add_2(Node *node);
 
 static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
@@ -368,7 +375,7 @@ static void start_function(llvm::Function *Fn, Obj *funcNode) {
 }
 
 static void build_function_body(llvm::Function *Func, Obj *funcNode) {
-
+  gen_stmt(funcNode->body);
 }
 
 static void finish_function(llvm::Function *Func, Obj *funcNode) {
@@ -402,6 +409,80 @@ static void emit_function(Obj *fn) {
   }
 }
 
+static void gen_block_item(Node *node) {
+  gen_stmt(node->body);
+}
+
+static void gen_block(Node *node) {
+  enter_scope();
+  bool is_goto = false;
+  for (Node *n = node->body; n; n = n->next) {
+    // last stmt is goto, current is not label, ingore next stmt
+    if (is_goto && n->kind != ND_LABEL && n->kind != ND_CASE) {
+       break;
+    }
+    gen_stmt(n);
+    is_goto = n->kind == ND_GOTO;
+  }
+  leave_scope();
+}
+
+static llvm::Value *gen_add_2(Node *node,
+    llvm::Value *operandL, llvm::Value *operandR) {
+  llvm::Value *V = nullptr;
+
+  if (is_flonum(node->ty)) {
+    return Builder->CreateFAdd(operandL, operandR);
+  }
+
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateNUWAdd(operandL, operandR);
+  } else {
+    V = Builder->CreateNSWAdd(operandL, operandR);
+  }
+  return V;
+}
+
+
+static llvm::Value *gen_add(Node *node) {
+  llvm::Value *operandL, *operandR;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  return nullptr;
+}
+
+static llvm::Value *gen_expr(Node *node) {
+  llvm::Value *V = nullptr;
+  switch (node->kind)
+  {
+  case ND_ADD:
+    V = gen_add(node);
+    break;
+  
+  default:
+    break;
+  }
+  return V;
+}
+
+static void gen_stmt(Node *node) {
+  switch(node->kind) {
+  case ND_BLOCK_ITEM:
+    gen_block_item(node);
+    break;
+  
+  case ND_BLOCK:
+    gen_block(node);
+    break;
+
+  case ND_EXPR_STMT:
+    gen_expr(node->lhs);
+    break;
+
+  default:
+    std::cout << "Unimplemented kind: " << node->kind << std::endl;
+  }
+}
 
 void gen_ir(Obj *prog, const std::string &filename) {
   InitializeModule(filename);

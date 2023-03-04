@@ -1721,7 +1721,12 @@ static void gen_return(Node *node) {
   }
 }
 
+static void gen_block_item(Node *node) {
+  gen_stmt(node->body);
+}
+
 static void gen_block(Node *node) {
+  enter_scope();
   bool is_goto = false;
   for (Node *n = node->body; n; n = n->next) {
     // last stmt is goto, current is not label, ingore next stmt
@@ -1731,11 +1736,6 @@ static void gen_block(Node *node) {
     gen_stmt(n);
     is_goto = n->kind == ND_GOTO;
   }
-}
-
-static void gen_compound_stmt(Node *node) {
-  enter_scope();
-  gen_block(node);
   leave_scope();
 }
 
@@ -1813,8 +1813,8 @@ static void gen_stmt(Node *node) {
     case ND_LABEL:
       gen_label(node);
       break;
-    case ND_COMPOUND_STMT:
-      gen_compound_stmt(node);
+    case ND_BLOCK_ITEM:
+      gen_block_item(node);
       break;
     case ND_EXPR_STMT:
       gen_expr(node->lhs);
