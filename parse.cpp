@@ -2827,6 +2827,10 @@ static Type *struct_decl(Token **rest, Token *tok) {
       bits += mem->ty->size * 8;
     }
 
+    if (mem->is_bitfield) {
+      ty->has_bitfield = true;
+    }
+
     if (!ty->is_packed && ty->align < mem->align)
       ty->align = mem->align;
   }

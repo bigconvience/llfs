@@ -89,6 +89,15 @@ static int getTypeId(Type *ty) {
   return I64;
 }
 
+// 求8的倍数
+int align_to_eight(int n) {
+  return ((n - 1) / 8 + 1);
+}
+
+static llvm::Type *get_int_n_ty(int size) {
+  return Builder->getIntNTy(size * 8);
+}
+
 static bool is_bool_value(llvm::Value *V) {
   return V->getType() == Builder->getInt1Ty();
 }
@@ -529,6 +538,17 @@ static std::string buildSeperator(int count, std::string target) {
   return result;
 }
 
+static void dump_member(Member *member) {
+  output<< buildSeperator(stmt_level, "dump_member, idx: ")
+        << member->idx  
+        << " offset: " << member->offset
+        << " is_bitfield: " << member->is_bitfield
+        << " bit_offset: " << member->bit_offset
+        << " bit_width: " << member->bit_width
+        << " ty size: " << member->ty->size
+        << std::endl;
+}
+
 static llvm::BasicBlock *createBasicBlock() {
   llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
   return llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction); 
@@ -675,8 +695,8 @@ static llvm::Value *gen_member_ptr(Node *node, llvm::Value *ptrval) {
   IndexValues.push_back(get_offset_int32(0));
   IndexValues.push_back(get_offset_int32(member->idx));
 
-  output << buildSeperator(stmt_level, "gen_member_ptr idx: ")
-        << member->idx << std::endl;
+  output << buildSeperator(stmt_level, "gen_member_ptr") << std::endl;
+  dump_member(member);
   llvm::Value *target = Builder->CreateInBoundsGEP(ptrval->getType()->getNonOpaquePointerElementType(), ptrval, IndexValues);
   return target;
 }
@@ -1858,18 +1878,37 @@ static int getMemberCount(Type *ctype) {
   return memberCount;	
 }
 
-static llvm::StructType *yuc2StructType(Type *ctype) {
-  llvm::SmallVector<llvm::Type *, 16> Types;
+static llvm::Type* get_padding_type(int align, int size) {
+  int padSize = align - size;
+  return padSize > 0 ? getPaddingType(padSize) : nullptr;
+}
 
-  int memberCount = getMemberCount(ctype);
-  Types.reserve(memberCount);
+static bool is_aligned(int offset, int size) {
+  return offset % size == 0;
+}
+
+static llvm::StructType *create_struct_type(Type *ctype) {
+  Token *tag = ctype->tag;
+  // tag
+  llvm::StringRef suffix = get_tag_type_name(tag).c_str();
+  // struct
+  llvm::StructType *type = llvm::StructType::create(*TheContext);
+  addRecordTypeName(ctype, type, suffix);
+  push_tag_scope(ctype, type);
+  return type;
+}
+
+static llvm::StructType *yuc2StructType(Type *ctype) {
+  std::vector<llvm::Type *> Types;
+
   Member *member = ctype->union_field;
   llvm::StructType *type;
   int DesiredSize = ctype->size;
   Token *tag = ctype->tag;
   // tag
   llvm::StringRef suffix = get_tag_type_name(tag).c_str();
-  output << "yuc2StructType DesiredSize:" << DesiredSize 
+  output << "yuc2StructType DesiredSize:" << DesiredSize
+        << " has_bitfield: " << ctype->has_bitfield 
         << " is_typedef:" << ctype->is_typedef
         << " tag: " << suffix.data()
         << " align:" << ctype->align << std::endl;
@@ -1877,7 +1916,6 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   if (member) {
     int Size = member->ty->size;
     output << "union member idx: " << member->idx << " size: " << Size << std::endl;
-    
     Types.push_back(yuc2LLVMType(member->ty));
     if (DesiredSize > Size) {
       int PadSize = DesiredSize - Size;
@@ -1895,22 +1933,61 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
     return type;
   }
   // struct
-  type = llvm::StructType::create(*TheContext);
-  addRecordTypeName(ctype, type, suffix);
-  push_tag_scope(ctype, type);
+  bool packed = false;
 
   int index = 0;
-  for (Member *member = ctype->members; member; member = member->next) {
-    Types.push_back(yuc2LLVMType(member->ty));
-    member->idx = index++;
-    int PadSize = member->align - member->ty->size;
-    if (PadSize > 0) {
-      llvm::Type *paddingType = getPaddingType(PadSize);
-      Types.push_back(paddingType);
+  member = ctype->members;
+  while (member) {
+    dump_member(member);
+    if (member->is_bitfield) {
+      int bit_width = member->bit_width;
+      int bit_offset = member->bit_offset;
+      int max_align = member->align;
+      int offset = member->offset;
+
+      member->idx = index;
+      member = member->next;
+      while(member && member->is_bitfield && member->offset == offset ) {
+        bit_width += member->bit_width;
+        member->idx = index;
+        if (max_align > member->align) {
+          max_align = member->align;
+        }
+        member = member->next;
+      }
+
+      int type_size = align_to_eight(bit_width);
+      output << " offset: " << offset 
+        << " bit_width: " << bit_width 
+        << " type_size: " << type_size
+        << " max_align: " << max_align
+        << std::endl;
+      Types.push_back(get_int_n_ty(type_size));
       index++;
+
+      if (!is_aligned(bit_offset / 8, type_size)) {
+        packed = true;
+      }
+
+      int byte_size = type_size + bit_offset / 8;
+      llvm::Type *paddingType = get_padding_type(max_align, byte_size);
+      if (paddingType) {
+        Types.push_back(paddingType);
+        index++;
+      }
+    } else {
+      Types.push_back(yuc2LLVMType(member->ty));
+      member->idx = index++;
+      llvm::Type *paddingType = get_padding_type(member->align, member->ty->size);
+      if (paddingType) {
+        Types.push_back(paddingType);
+        index++;
+      }
+      member = member->next;
     }
   }
-  type->setBody(Types);
+  type = create_struct_type(ctype);
+  type->setBody(Types, packed);
   output << "isLiteral: " << type->isLiteral() << std::endl;
   return type;
 }
@@ -1929,6 +2006,7 @@ static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef
   Ty->setName(OS.str());
   output << "addRecordTypeName: " << Ty->getName().data() << std::endl;
 }
+
 
 static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
   llvm::StructType *ty = find_tag(ctype);
@@ -2076,23 +2154,71 @@ llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, Type *ArrayType, ch
   return llvm::ConstantArray::get(
         llvm::ArrayType::get(CommonElementType, NumElements), Elts);
  }
+
+
+int get_grouped_bitfield_size(Member **rest, Member *member, int offset) {
+  int bit_width = 0;
+  while(member && member->is_bitfield && member->offset == offset) {
+    bit_width += member->bit_width;
+    member = member->next;
+  }
+  *rest = member;
+  return align_to_eight(bit_width);
+}
+
+
+llvm::Constant *init_bitfield_struct(llvm::StructType *origin_type, Type *ctype, char *buf, int offset) {
+  std::vector<llvm::Type *> types;
+  std::vector<llvm::Constant *> elements;
+
+  Member *member = ctype->members;
+  while(member) {
+    if (!member->is_bitfield) {
+      int index = member->idx;
+      llvm::Type *memberTy = origin_type->getTypeAtIndex(index);
+      types.push_back(memberTy);
+      llvm::Constant *v = buffer2Constants(memberTy, member->ty, NULL, buf, offset + member->offset);
+      elements.push_back(v);
+      member = member->next;
+    } else {
+      size_t grouped_size = get_grouped_bitfield_size(&member, member, member->offset);
+      llvm::Type *i8ty = Builder->getInt8Ty();
+      char *start = buf + offset;
+      for (int i = 0; i < grouped_size; i++) {
+        types.push_back(i8ty);
+        llvm::Constant *v = llvm::ConstantInt::get(i8ty, read_buf(start + i, 1));
+        elements.push_back(v);
+      }
+    }
+  }
+
+  llvm::StructType *type = llvm::StructType::create(types);
+  return llvm::ConstantStruct::get(type, elements);
+}
  
 llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, Type *ctype, char *buf, int offset) {
-  llvm::SmallVector<llvm::Constant *, 16> Elements;
-  unsigned NumElements = getMemberCount(ctype);
-
-  Elements.reserve(NumElements);
-  output << "EmitRecordInitialization NumElements： " << NumElements
-    << std::endl;
-  int index = 0; 
-  for (Member *member = ctype->members; member; member = member->next) {
+  std::vector<llvm::Constant *> Elements;
+  Member *member = ctype->members;
+  while(member) {
     // Type *Ty = yuc2LLVMType(member->ty);
-    llvm::Type *memberTy = Ty->getTypeAtIndex(index++);
+    int index = member->idx;
+    llvm::Type *memberTy = Ty->getTypeAtIndex(index);
     llvm::Constant *constantValue = buffer2Constants(memberTy, member->ty, NULL, buf, offset + member->offset);
     Elements.push_back(constantValue);
+    member = member->next;
+    while(member && member->idx == index) {
+      member = member->next;
+    }
   }
 
   return llvm::ConstantStruct::get(Ty, Elements);
+}
+
+llvm::Constant *init_struct(llvm::StructType *type, Type *ctype, char *buf, int offset) {
+  if (ctype->has_bitfield) {
+    return init_bitfield_struct(type, ctype, buf, offset);
+  }
+  return EmitRecordInitialization(type, ctype, buf, offset);
 }  
 
 llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, Type *ctype, char *buf, int offset) {
@@ -2270,7 +2396,7 @@ static llvm::Constant *buffer2Constants(llvm::Type *varType, Type *ctype, Reloca
       constant = EmitUnionInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
       break;
     case TY_STRUCT:
-      constant = EmitRecordInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
+      constant = init_struct(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
       break; 
     case TY_PTR:
       constant = EmitPointerInitialization(static_cast<llvm::PointerType *>(varType), ctype, buf, offset, rel);

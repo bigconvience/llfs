@@ -389,8 +389,10 @@ struct Type {
 
   // Struct
   Member *members;
+  Member *grouped_members;
   bool is_flexible;
   bool is_packed;
+  bool has_bitfield;
 
   // Function type
   Type *return_ty;
@@ -420,6 +422,7 @@ struct Member {
   bool is_bitfield;
   int bit_offset;
   int bit_width;
+  Member *grouped_member;
 };
 
 // This struct represents a variable initializer. Since initializers
