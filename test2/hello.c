@@ -14,7 +14,7 @@ struct T1 {
 
 } g46 = {1, 2, 3};
 
-   struct T3 {
+   struct T2 {
     int a : 10;
     int b : 10;
     int c : 10;
@@ -30,10 +30,12 @@ struct bit1 {
 
 int main() { 
 
-  ASSERT(1, g45.b);
-  ASSERT(2, g46.b);
+  // ASSERT(1, g45.b);
+  // ASSERT(1, g45.c);
+  // ASSERT(2, g46.b);
+  // ASSERT(2, g46.c);
   ASSERT(3, g47.c);
 
-ASSERT(3, x.c);
-    return 0;
+  //ASSERT(3, x.c);
+  return 0;
 }

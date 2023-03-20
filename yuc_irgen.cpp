@@ -47,7 +47,7 @@ static llvm::Value *gen_cond(Node *node);
 static llvm::Value *gen_comma(Node *node);
 static llvm::Value *gen_comma_addr(Node *node);
 static void gen_label(Node *node);
-
+static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to);
 static void gen_branch(llvm::BasicBlock *target);
 static void gen_basicblock(llvm::BasicBlock *target);
 
@@ -56,12 +56,15 @@ static std::map<Obj *, llvm::Constant*> globalVars;
 static std::map<Type *, llvm::StructType*> tagToType;
 static llvm::Value *gen_number(Node *node);
 
-static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix);
+static void addRecordTypeName(Type *ctype, llvm::StructType *Ty);
 static llvm::Type *emit_pointer_type(Type *ctype);
 static int getMemberCount(Type *ctype);
 static llvm::StructType *ConvertRecordDeclType(Type *ctype);
 static llvm::Constant *gen_literal(Node *node);
 static llvm::GlobalValue::LinkageTypes yuc2LinkageType(Obj *yucNode);
+std::string get_struct_name(Type *ctype, bool packed);
+static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type, Type *ctype);
+
 
 enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
 
@@ -357,6 +360,7 @@ static std::string get_scope_name(Obj *var) {
 
 static std::string get_tag_name(Type *ty) {
   std::string tag_name = get_ident(ty->tag);
+  tag_name.append(".");
   tag_name.append(std::to_string(ty->scope_level));
   return tag_name;
 }
@@ -401,8 +405,7 @@ static void push_constant(Obj *var, llvm::Value *v) {
   scope->constants[var_name] = v;
 }
 
-static llvm::StructType *find_tag(Type *ty) {
-  std::string tag_name = get_tag_name(ty);
+static llvm::StructType *find_tag(std::string tag_name) {
   for (BlockScope *sc = scope; sc; sc = sc->next) {
     llvm::StructType *type = sc->tags[tag_name];
     if (type) {
@@ -412,9 +415,28 @@ static llvm::StructType *find_tag(Type *ty) {
   return nullptr;
 }
 
+static llvm::StructType *find_tag(Type *ty) {
+  std::string tag_name = get_tag_name(ty);
+  return find_tag(tag_name);
+}
+
+static void push_tag_scope(std::string tag_name, llvm::StructType *type) {
+  scope->tags[tag_name] = type;
+}
+
 static void push_tag_scope(Type *ty, llvm::StructType *type) {
   std::string tag_name = get_tag_name(ty);
-  scope->tags[tag_name] = type;
+  push_tag_scope(tag_name, type);
+}
+
+void push_packed_tag_scope(Type *ctype, llvm::StructType *type) {
+  std::string packed_name = get_struct_name(ctype, true);
+  push_tag_scope(packed_name, type);
+}
+
+llvm::StructType *find_packed_tag(Type *ctype) {
+  std::string packed_name = get_struct_name(ctype, true);
+  return find_tag(packed_name);
 }
 
 /// Return the value offset.
@@ -549,6 +571,17 @@ static void dump_member(Member *member) {
         << std::endl;
 }
 
+static void dump_ctype(Type *ctype) {
+  Token *tag = ctype->tag;
+  llvm::StringRef suffix = get_tag_type_name(tag).c_str();
+  output << buildSeperator(stmt_level, "dump_ctype, size: ") 
+      << ctype->size
+      << " has_bitfield: " << ctype->has_bitfield 
+      << " is_typedef:" << ctype->is_typedef
+      << " tag: " << suffix.data()
+      << " align:" << ctype->align << std::endl;
+}
+
 static llvm::BasicBlock *createBasicBlock() {
   llvm::Function *TheFunction = Builder->GetInsertBlock()->getParent();
   return llvm::BasicBlock::Create(CGM().getLLVMContext(), "", TheFunction); 
@@ -623,12 +656,41 @@ static llvm::Value *gen_subscript(Node *node) {
   return load(node->ty, Addr); 
 }
 
+// check able to cast to primitive type
+static bool is_primitive_struct(Type *ctype) {
+  if (!ctype->has_bitfield) {
+    return false;
+  }
+  llvm::StructType *type = find_tag(ctype);
+  return type->getNumElements() == 1;
+}
+
+// cast type for bitfield struct
+static llvm::Value *cast_struct_type(llvm::Value *origin, Type *ctype) {
+  if (!ctype->has_bitfield) {
+    return origin;
+  }
+  llvm::StructType *targetTy = find_tag(ctype);
+  unsigned AS = origin->getType()->getPointerAddressSpace();
+  llvm::Type *dest_type = nullptr;
+  if (is_primitive_struct(ctype)) {
+    // convert to primitive type pointer
+    int index = 0;
+    dest_type = targetTy->getTypeAtIndex(index)->getPointerTo(AS);
+  } else {
+    // convert to struct pointer
+    dest_type = targetTy->getPointerTo(AS);
+  }
+  llvm::Value *castedV = Builder->CreateBitCast(origin, dest_type);
+  return castedV;
+}
+
 static llvm::Value *gen_var_addr(Obj *var) {
   llvm::Value *Addr = nullptr;
   std::string typeStr = ctypeKindString(var->ty->kind);
   std::string varName = var->name;
   output << buildSeperator(stmt_level + 1, "gen_var_addr type:" + typeStr)
-    << " " << var->ty->is_typedef
+    << " is_typedef: " << var->ty->is_typedef
     << " " << varName << std::endl;
   if (var->is_static) {
     Addr = TheModule->getNamedGlobal(varName);
@@ -689,32 +751,51 @@ llvm::Value *gen_deref(Node *node) {
   return V;
 }
 
-static llvm::Value *gen_member_ptr(Node *node, llvm::Value *ptrval) { 
-  Member *member = node->member;
+static llvm::Value *gen_get_member_ptr(Member *member, llvm::Value *ptrval) { 
   std::vector<llvm::Value *> IndexValues;
   IndexValues.push_back(get_offset_int32(0));
-  IndexValues.push_back(get_offset_int32(member->idx));
-
-  output << buildSeperator(stmt_level, "gen_member_ptr") << std::endl;
-  dump_member(member);
+  IndexValues.push_back(get_offset_int32(member->type_idx));
   llvm::Value *target = Builder->CreateInBoundsGEP(ptrval->getType()->getNonOpaquePointerElementType(), ptrval, IndexValues);
   return target;
 }
 
 static llvm::Value *gen_member_addr(Node *node) {
   int cur_level = ++stmt_level;
-  output << buildSeperator(cur_level, "gen_member start") << std::endl;
+  output << buildSeperator(cur_level, "gen_member_addr start") << std::endl;
   llvm::Value *base = gen_addr(node->lhs);
-  llvm::Value *ptr = gen_member_ptr(node, base);
+  Type *ctype = node->lhs->ty;
+  base = cast_struct_type(base, ctype);
+  if (is_primitive_struct(ctype)) {
+    return base;
+  }
+  // get elementer ptr for struct member
+  llvm::Value *ptr = gen_get_member_ptr(node->member, base);
   --stmt_level;
-  output << buildSeperator(cur_level, "gen_member end") << std::endl;
+  output << buildSeperator(cur_level, "gen_member_addr end") << std::endl;
   return ptr;
+}
+
+static llvm::Value *gen_get_bitfield(Member *member, llvm::Value *value) {
+  llvm::Value *V = value;
+  V = Builder->CreateShl(V, member->lhs_bits);
+  V = Builder->CreateAShr(V, member->rhs_bits);
+  Type *from_type = get_int_type(member->real_type_size);
+  Type *to_type = member->ty;
+  V = cast(V, from_type, to_type);
+  return V;
 }
 
 static llvm::Value *gen_member(Node *node) {
   llvm::Value *memberAddr = gen_member_addr(node);
-  llvm::Type *memberType = yuc2LLVMType(node->ty);
-  return Builder->CreateLoad(memberType, memberAddr);
+  Member *member = node->member;
+  Type *ctype = node->lhs->ty;
+  llvm::StructType *type = find_tag(ctype);
+  llvm::Type *memberType = type->getTypeAtIndex(member->type_idx);
+  llvm::Value *value = Builder->CreateLoad(memberType, memberAddr);
+  if (member->is_bitfield) {
+    return gen_get_bitfield(member, value);
+  }
+  return value;
 }
 
 static llvm::Type *struct_to_primitive(int size) {
@@ -1888,14 +1969,24 @@ static bool is_aligned(int offset, int size) {
 }
 
 static llvm::StructType *create_struct_type(Type *ctype) {
-  Token *tag = ctype->tag;
-  // tag
-  llvm::StringRef suffix = get_tag_type_name(tag).c_str();
   // struct
   llvm::StructType *type = llvm::StructType::create(*TheContext);
-  addRecordTypeName(ctype, type, suffix);
+  addRecordTypeName(ctype, type);
   push_tag_scope(ctype, type);
   return type;
+}
+
+static void compute_bit_shift(Member *start, Member *end, int type_size, int start_bit_offset) {
+  Member *member = start;
+  int total_bits = type_size * 8;
+  while(member != end) {
+    int rhs_bits = total_bits - member->bit_width;
+    int lhs_bits = rhs_bits - (member->bit_offset - start_bit_offset);
+    member->rhs_bits = rhs_bits;
+    member->lhs_bits = lhs_bits;
+    member->real_type_size = type_size;
+    member = member->next;
+  }
 }
 
 static llvm::StructType *yuc2StructType(Type *ctype) {
@@ -1904,14 +1995,9 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   Member *member = ctype->union_field;
   llvm::StructType *type;
   int DesiredSize = ctype->size;
-  Token *tag = ctype->tag;
-  // tag
-  llvm::StringRef suffix = get_tag_type_name(tag).c_str();
-  output << "yuc2StructType DesiredSize:" << DesiredSize
-        << " has_bitfield: " << ctype->has_bitfield 
-        << " is_typedef:" << ctype->is_typedef
-        << " tag: " << suffix.data()
-        << " align:" << ctype->align << std::endl;
+
+  dump_ctype(ctype);
+
   // union
   if (member) {
     int Size = member->ty->size;
@@ -1940,28 +2026,31 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   while (member) {
     dump_member(member);
     if (member->is_bitfield) {
+      Member *mem_start = member, *mem_end;
       int bit_width = member->bit_width;
       int bit_offset = member->bit_offset;
       int max_align = member->align;
       int offset = member->offset;
 
-      member->idx = index;
+      member->type_idx = index;
       member = member->next;
       while(member && member->is_bitfield && member->offset == offset ) {
+        dump_member(member);
         bit_width += member->bit_width;
-        member->idx = index;
+        member->type_idx = index;
         if (max_align > member->align) {
           max_align = member->align;
         }
         member = member->next;
       }
-
+      mem_end = member;
       int type_size = align_to_eight(bit_width);
-      output << " offset: " << offset 
+      output << "after grouped, offset: " << offset 
         << " bit_width: " << bit_width 
         << " type_size: " << type_size
         << " max_align: " << max_align
         << std::endl;
+      compute_bit_shift(mem_start, mem_end, type_size, bit_offset);
       Types.push_back(get_int_n_ty(type_size));
       index++;
 
@@ -1977,7 +2066,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
       }
     } else {
       Types.push_back(yuc2LLVMType(member->ty));
-      member->idx = index++;
+      member->type_idx = index++;
       llvm::Type *paddingType = get_padding_type(member->align, member->ty->size);
       if (paddingType) {
         Types.push_back(paddingType);
@@ -1988,22 +2077,29 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   }
   type = create_struct_type(ctype);
   type->setBody(Types, packed);
-  output << "isLiteral: " << type->isLiteral() << std::endl;
+  if (ctype->has_bitfield) {
+    create_packed_struct_type(type, ctype);
+  }
   return type;
 }
 
-static void addRecordTypeName(Type *ctype, llvm::StructType *Ty, llvm::StringRef suffix) {
+
+std::string get_struct_name(Type *ctype, bool packed) {
   llvm::SmallString<256> TypeName;
   llvm::raw_svector_ostream OS(TypeName);
   std::string kindName = ctypeKindString(ctype->kind);
   OS << kindName << ".";
-
-  if (!suffix.empty()) {
-    OS << suffix;
-  } else {
-    OS << "anon";
+  // tag
+  std::string tag_name = get_tag_type_name(ctype->tag);
+  OS << tag_name;
+  if (packed) {
+    OS << ".packed";
   }
-  Ty->setName(OS.str());
+  return OS.str().str();
+}
+
+static void addRecordTypeName(Type *ctype, llvm::StructType *Ty) {
+  Ty->setName(get_struct_name(ctype, false));
   output << "addRecordTypeName: " << Ty->getName().data() << std::endl;
 }
 
@@ -2063,6 +2159,20 @@ static llvm::Type *yuc2LLVMType(Type *ctype) {
       break;
   }
   return type;
+}
+
+llvm::Type *create_init_type(Type *ctype) {
+  llvm::Type *normal_type = yuc2LLVMType(ctype);
+  if (ctype->has_bitfield) {
+    return find_packed_tag(ctype);
+  }
+  return normal_type;
+}
+
+llvm::Constant *create_initializer(llvm::Type *origin_type, Obj *var) {
+  Type *ctype = var->ty;
+  llvm::Type *normal_type = ctype->has_bitfield ? find_tag(ctype) : origin_type;
+  return yuc2Constants(normal_type, var);
 }
 
 static llvm::GlobalVariable *
@@ -2167,46 +2277,95 @@ int get_grouped_bitfield_size(Member **rest, Member *member, int offset) {
 }
 
 
-llvm::Constant *init_bitfield_struct(llvm::StructType *origin_type, Type *ctype, char *buf, int offset) {
-  std::vector<llvm::Type *> types;
+llvm::Constant *init_bitfield_struct(llvm::StructType *type, Type *ctype, char *buf) {
   std::vector<llvm::Constant *> elements;
 
   Member *member = ctype->members;
+  int pre_index = -1;
   while(member) {
-    if (!member->is_bitfield) {
-      int index = member->idx;
-      llvm::Type *memberTy = origin_type->getTypeAtIndex(index);
-      types.push_back(memberTy);
-      llvm::Constant *v = buffer2Constants(memberTy, member->ty, NULL, buf, offset + member->offset);
+    Member *end;
+    int index = member->type_idx;
+    if (pre_index + 1 < index) {
+      llvm::Type *memberTy = type->getTypeAtIndex(pre_index + 1);
+      llvm::Constant *v = llvm::UndefValue::get(memberTy);
       elements.push_back(v);
-      member = member->next;
+     }
+
+    if (!member->is_bitfield) {
+      llvm::Type *memberTy = type->getTypeAtIndex(index);
+      llvm::Constant *v = buffer2Constants(memberTy, member->ty, NULL, buf, member->offset);
+      elements.push_back(v);
+      end = member->next;
     } else {
-      size_t grouped_size = get_grouped_bitfield_size(&member, member, member->offset);
+      size_t grouped_size = get_grouped_bitfield_size(&end, member, member->offset);
       llvm::Type *i8ty = Builder->getInt8Ty();
-      char *start = buf + offset;
+      int start_index = member->offset + member->bit_offset / 8;
+      output << "start_index: " << start_index 
+        << " grouped_size:" << grouped_size << std::endl;
+      char *start = buf + start_index;
       for (int i = 0; i < grouped_size; i++) {
-        types.push_back(i8ty);
         llvm::Constant *v = llvm::ConstantInt::get(i8ty, read_buf(start + i, 1));
         elements.push_back(v);
       }
     }
+    pre_index = index;
+    member = end;
   }
 
-  llvm::StructType *type = llvm::StructType::create(types);
+  if (pre_index + 1 < type->getNumElements()) {
+    llvm::Type *memberTy = type->getTypeAtIndex(pre_index + 1);
+    llvm::Constant *v = llvm::UndefValue::get(memberTy);
+    elements.push_back(v);
+  }
+
   return llvm::ConstantStruct::get(type, elements);
 }
- 
+
+static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type, Type *ctype) {
+  std::vector<llvm::Type *> types;
+
+  Member *member = ctype->members;
+  int pre_index = -1;
+  while(member) {
+    Member *end;
+    int index = member->type_idx;
+    
+    if (pre_index + 1 < member->type_idx) {
+      llvm::Type *memberTy = normal_type->getTypeAtIndex(pre_index + 1);
+      types.push_back(memberTy);
+    }
+
+    if (!member->is_bitfield) {
+      llvm::Type *memberTy = normal_type->getTypeAtIndex(index);
+      types.push_back(memberTy);
+      end = member->next;
+    } else {
+      size_t grouped_size = get_grouped_bitfield_size(&end, member, member->offset);
+      llvm::Type *i8ty = Builder->getInt8Ty();
+      for (int i = 0; i < grouped_size; i++) {
+        types.push_back(i8ty);
+      }
+    }
+    pre_index = index;
+    member = end;
+  }
+
+  llvm::StructType *type = llvm::StructType::get(*TheContext, types);
+  push_packed_tag_scope(ctype, type);
+  return type;
+}
+
 llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, Type *ctype, char *buf, int offset) {
   std::vector<llvm::Constant *> Elements;
   Member *member = ctype->members;
   while(member) {
     // Type *Ty = yuc2LLVMType(member->ty);
-    int index = member->idx;
+    int index = member->type_idx;
     llvm::Type *memberTy = Ty->getTypeAtIndex(index);
     llvm::Constant *constantValue = buffer2Constants(memberTy, member->ty, NULL, buf, offset + member->offset);
     Elements.push_back(constantValue);
     member = member->next;
-    while(member && member->idx == index) {
+    while(member && member->type_idx == index) {
       member = member->next;
     }
   }
@@ -2214,11 +2373,11 @@ llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, Type *ctype, char
   return llvm::ConstantStruct::get(Ty, Elements);
 }
 
-llvm::Constant *init_struct(llvm::StructType *type, Type *ctype, char *buf, int offset) {
+llvm::Constant *init_struct(llvm::StructType *type, Type *ctype, char *buf) {
   if (ctype->has_bitfield) {
-    return init_bitfield_struct(type, ctype, buf, offset);
+    return init_bitfield_struct(type, ctype, buf);
   }
-  return EmitRecordInitialization(type, ctype, buf, offset);
+  return EmitRecordInitialization(type, ctype, buf, 0);
 }  
 
 llvm::Constant *EmitUnionInitialization(llvm::StructType *Ty, Type *ctype, char *buf, int offset) {
@@ -2396,7 +2555,7 @@ static llvm::Constant *buffer2Constants(llvm::Type *varType, Type *ctype, Reloca
       constant = EmitUnionInitialization(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
       break;
     case TY_STRUCT:
-      constant = init_struct(static_cast<llvm::StructType *>(varType), ctype, buf, offset);
+      constant = init_struct(static_cast<llvm::StructType *>(varType), ctype, buf + offset);
       break; 
     case TY_PTR:
       constant = EmitPointerInitialization(static_cast<llvm::PointerType *>(varType), ctype, buf, offset, rel);
@@ -2452,8 +2611,7 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
 	}
 
   output << "createGlobalVar name:" << name << std::endl;
-  output << std::endl;
-  llvm::Type *DesiredType = yuc2LLVMType(ctype);
+  llvm::Type *DesiredType = create_init_type(ctype);
   TheModule->getOrInsertGlobal(name, DesiredType);
   llvm::GlobalVariable *gVar = TheModule->getNamedGlobal(name);
   gVar->setAlignment(llvm::MaybeAlign(yucNode->align));
@@ -2461,7 +2619,7 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
   	gVar->setDSOLocal(true);
   }
 
-  llvm::Constant *initializer = yuc2Constants(DesiredType, yucNode);
+  llvm::Constant *initializer = create_initializer(DesiredType, yucNode);
   putGlobalVar(yucNode, initializer);
   gVar->setInitializer(initializer);
   gVar->setLinkage(yuc2LinkageType(yucNode));

@@ -417,11 +417,16 @@ struct Member {
   int idx;
   int align;
   int offset;
+  int type_idx; // index correspond
 
   // Bitfield
   bool is_bitfield;
   int bit_offset;
   int bit_width;
+  int lhs_bits; // left shift bits
+  int rhs_bits; // right shift bits
+  int real_type_size; // grouped type size
+
   Member *grouped_member;
 };
 
@@ -477,6 +482,7 @@ Type *array_of(Type *base, int size);
 Type *vla_of(Type *base, Node *expr);
 Type *enum_type(void);
 Type *struct_type(void);
+Type *get_int_type(int size);
 void add_type(Node *node);
 bool is_const_expr(Node *node);
 bool is_const_initializer(Initializer *init);
