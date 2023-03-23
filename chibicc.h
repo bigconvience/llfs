@@ -595,7 +595,7 @@ static std::string ctypeKindString(TypeKind kind) {
       kindStr = "union";
       break;
     default:
-      kindStr = "unknow type kind";
+      kindStr = std::to_string(kind);
       break;
     }
   return kindStr;
@@ -712,7 +712,7 @@ static std::string node_kind_info(NodeKind kind) {
     case ND_SUBSCRIPT:
       return "ND_SUBSCRIPT";
     default:
-      return "unkonw";
+      return std::to_string(kind);
   }
 }
 #endif

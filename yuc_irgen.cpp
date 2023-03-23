@@ -16,6 +16,8 @@
 #include <vector>
 #include <map>
 
+#define DUMP_SCOPE 0
+
 static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
 // https://llvm.org/doxygen/IRBuilder_8h_source.html
@@ -336,14 +338,18 @@ struct BlockScope {
 static BlockScope *scope = new BlockScope();
 
 static void enter_scope(void) {
-  output << "enter scope" << std::endl;
+  if (DUMP_SCOPE) {
+    output << "enter scope" << std::endl;
+  }
   BlockScope *sc = new BlockScope();
   sc->next = scope;
   scope = sc;
 }
 
 static void leave_scope(void) {
-  output << "leave scope" << std::endl;
+  if (DUMP_SCOPE) {
+    output << "leave scope" << std::endl;
+  }
   scope = scope->next;
 }
 
@@ -354,7 +360,9 @@ static std::string get_scope_name(Obj *var) {
     var_name.append("..");
     var_name.append(std::to_string(scope_level));
   }
-  output << "get_scope_name:" << var_name << std::endl;
+  if (DUMP_SCOPE) {
+    output << "get_scope_name:" << var_name << std::endl;
+  }
   return var_name;
 }
 
@@ -1823,11 +1831,6 @@ static void gen_return(Node *node) {
 }
 
 static void gen_block_item(Node *node) {
-  gen_stmt(node->body);
-}
-
-static void gen_block(Node *node) {
-  enter_scope();
   bool is_goto = false;
   for (Node *n = node->body; n; n = n->next) {
     // last stmt is goto, current is not label, ingore next stmt
@@ -1837,6 +1840,11 @@ static void gen_block(Node *node) {
     gen_stmt(n);
     is_goto = n->kind == ND_GOTO;
   }
+}
+
+static void gen_block(Node *node) {
+  enter_scope();
+  gen_block_item(node);
   leave_scope();
 }
 
@@ -1880,6 +1888,9 @@ static void gen_case(Node *node) {
 }
 
 static void gen_stmt(Node *node) {
+  if (!node) {
+    return;
+  }
   int cur_count = ++stmt_count;
   int level = ++stmt_level;
   NodeKind kind = node->kind;
@@ -2318,7 +2329,8 @@ llvm::Constant *init_bitfield_struct(llvm::StructType *type, Type *ctype, char *
     elements.push_back(v);
   }
 
-  return llvm::ConstantStruct::get(type, elements);
+  llvm::StructType *packed_type = find_packed_tag(ctype);
+  return llvm::ConstantStruct::get(packed_type, elements);
 }
 
 static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type, Type *ctype) {
@@ -2326,6 +2338,7 @@ static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type
 
   Member *member = ctype->members;
   int pre_index = -1;
+  int offset = 0;
   while(member) {
     Member *end;
     int index = member->type_idx;
@@ -2339,8 +2352,11 @@ static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type
       llvm::Type *memberTy = normal_type->getTypeAtIndex(index);
       types.push_back(memberTy);
       end = member->next;
+      offset = member->offset + member->ty->size;
     } else {
       size_t grouped_size = get_grouped_bitfield_size(&end, member, member->offset);
+      int start_index = member->offset + member->bit_offset / 8;
+      offset = start_index + grouped_size;
       llvm::Type *i8ty = Builder->getInt8Ty();
       for (int i = 0; i < grouped_size; i++) {
         types.push_back(i8ty);
@@ -2349,7 +2365,11 @@ static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type
     pre_index = index;
     member = end;
   }
-
+  output << "offset: " << offset << " struct size: " << ctype->size << std::endl;
+  llvm::Type *tail_padding = get_padding_type(ctype->size, offset);
+  if (tail_padding) {
+    types.push_back(tail_padding);
+  }
   llvm::StructType *type = llvm::StructType::get(*TheContext, types);
   push_packed_tag_scope(ctype, type);
   return type;
@@ -2635,7 +2655,6 @@ static void emit_data(Obj *ast) {
 }
 
 static llvm::Type *gen_return_type(Type *return_ty) {
-  output << "gen_return_type " << std::endl;
   if (return_ty->kind == TY_STRUCT) {
     return struct_to_return(return_ty);
   }

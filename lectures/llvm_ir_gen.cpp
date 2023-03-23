@@ -305,22 +305,6 @@ static llvm::Value *gen_expr(Node *node);
 static llvm::Value *gen_add(Node *node);
 static llvm::Value *gen_cast(Node *node);
 
-// declaration or statement
-static void gen_block_item(Node *node) {
-  gen_stmt(node->body);
-}
-
-// emit statemnt in block 
-static void gen_block(Node *node) {
-  enter_scope();
-  Node *stmt = node->body;
-  while(stmt) {
-    gen_stmt(stmt);
-    stmt = stmt->next;
-  }
-  leave_scope();
-}
-
 // emit num + num
 static llvm::Value *gen_math_add(Type *result_ty, llvm::Value *L, llvm::Value *R) {
   if (is_flonum(result_ty)) {
@@ -351,6 +335,22 @@ static llvm::Value *gen_add(Node *node) {
   return gen_math_add(node->ty, L, R);
 }
 
+// declaration or statement
+static void gen_block_item(Node *node) {
+  Node *stmt = node->body;
+  while(stmt) {
+    gen_stmt(stmt);
+    stmt = stmt->next;
+  }
+}
+
+// emit statemnt in block 
+static void gen_block(Node *node) {
+  enter_scope();
+  gen_block_item(node);
+  leave_scope();
+}
+
 // emit cast value by type
 static llvm::Value *emit_cast(llvm::Value *V, Type *from, Type *to) {
   return V;
@@ -375,7 +375,7 @@ static llvm::Value *gen_var_addr(Obj *var) {
 
 // emit node adderss
 static llvm::Value *gen_addr(Node *node) {
-  switch(node->kind) {
+  switch (node->kind) {
   case ND_VAR:
     return gen_var_addr(node->var);
   }
@@ -386,7 +386,7 @@ static llvm::Value *gen_var_value(Node *node) {
   Obj *var = node->var;
   llvm::Value *addr = gen_addr(node);
   Type *ty = var->ty;
-  return emit_load(ty, addr); 
+  return emit_load(ty, addr);
 }
 
 // emit all expression
@@ -396,11 +396,13 @@ static llvm::Value *gen_expr(Node *node) {
   switch (node->kind)
   {
   case ND_NULL_EXPR:
-      break;
+    break;
   case ND_CAST:
     V = gen_cast(node);
+    break;
   case ND_VAR:
     V = gen_var_value(node);
+    break;
   default:
     break;
   }
@@ -409,19 +411,17 @@ static llvm::Value *gen_expr(Node *node) {
 
 static void gen_stmt(Node *node) {
   dump_node("gen_stmt", node);
-  switch(node->kind) {
+  switch (node->kind)
+  {
   case ND_BLOCK_ITEM:
     gen_block_item(node);
     break;
-  
   case ND_BLOCK:
     gen_block(node);
     break;
-
   case ND_EXPR_STMT:
     gen_expr(node->lhs);
     break;
-
   default:
     std::cout << "Unimplemented kind: " << node->kind << std::endl;
   }
