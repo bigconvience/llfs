@@ -613,7 +613,7 @@ static llvm::Value *gen_rvalue(Node *node, Obj *var) {
   }
   llvm::Value *Addr = gen_addr(node);
   Type *varTy = var->ty;
-  switch(node->ty->kind) {
+  switch(varTy->kind) {
   case TY_ARRAY:
     V = gen_get_ptr(node, Addr, getOffset(0));
     break;

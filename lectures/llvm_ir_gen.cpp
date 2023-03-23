@@ -17,23 +17,15 @@
 #include <map>
 
 #define DUMP_OBJ 0
+#define DUMP_NODE 1
 
-static void gen_stmt(Node *node);
-static void gen_block(Node *node);
-static void gen_block_item(Node *node);
-
-static llvm::Value *gen_expr(Node *node);
-static llvm::Value *gen_add(Node *node);
-static llvm::Value *gen_add_2(Node *node);
+//
+//= llvm framework utils
+//
 
 static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
 static std::unique_ptr<llvm::IRBuilder<>> Builder;
-
-static bool isAnnonVar(std::string &name) {
-  int index = name.find(".L..");
-  return index == 0;
-}
 
 static void InitializeModule(const std::string &filename) {
   TheContext = std::make_unique<llvm::LLVMContext>();
@@ -44,6 +36,10 @@ static void InitializeModule(const std::string &filename) {
 static llvm::LLVMContext &getLLVMContext() {
   return TheModule->getContext();
 }
+
+//
+//= block scope utils
+//
 
 typedef struct BlockScope {
   BlockScope *next;
@@ -91,16 +87,9 @@ static llvm::Value *find_var(Obj *var) {
   return nullptr;
 }
 
-static int get_align(Obj *var) {
-  int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
-      ? MAX(16, var->align) : var->align;
-  return align;
-}
-
-static bool is_builtin_name(std::string &name) {
-  return name == "__alloca_size__" 
-      || name == "__va_area__";
-}
+//
+//= debug utils
+//
 
 static void print_type(Type *type) {
   if (!type) {
@@ -121,10 +110,42 @@ static void print_obj(Obj *obj) {
   print_type(obj->ty);
 }
 
+static void dump_node(std::string tag, Node *node) {
+  if (!node || !DUMP_NODE) {
+    return;
+  }
+  std::cout << tag
+            << "=>Node type: " << node_kind_info(node->kind)
+            << std::endl;
+}
+
 static void dump_obj(Obj *obj) {
+  if (!DUMP_OBJ) {
+    return;
+  }
   for (Obj *cur = obj; cur; cur = cur->next) {
     print_obj(cur);
   }
+}
+
+//
+//= ast parse utils
+//
+
+static bool isAnnonVar(std::string &name) {
+  int index = name.find(".L..");
+  return index == 0;
+}
+
+static int get_align(Obj *var) {
+  int align = (var->ty->kind == TY_ARRAY && var->ty->size >= 16)
+      ? MAX(16, var->align) : var->align;
+  return align;
+}
+
+static bool is_builtin_name(std::string &name) {
+  return name == "__alloca_size__" 
+      || name == "__va_area__";
 }
 
 static llvm::Type *create_type(Type *ty) {
@@ -256,6 +277,159 @@ static void emit_data(Obj *prog) {
   emit_data(prog->next);
   emit_global_var(prog);
 }
+
+//
+// llvm ir emit utils
+//
+
+// load value for a type
+static llvm::Value* emit_load(Type *ty, llvm::Value *addr) {
+  llvm::Type *type = create_type(ty);
+  llvm::Value *V = Builder->CreateLoad(type, addr);
+  if (ty->kind == TY_BOOL) {
+    // bool is i8 in memory
+    V = Builder->CreateTrunc(V, Builder->getInt1Ty());
+  }
+  return V;
+}
+
+
+//
+//= emit statement and expression llvm ir
+//
+static void gen_stmt(Node *node);
+static void gen_block(Node *node);
+static void gen_block_item(Node *node);
+
+static llvm::Value *gen_expr(Node *node);
+static llvm::Value *gen_add(Node *node);
+static llvm::Value *gen_cast(Node *node);
+
+// declaration or statement
+static void gen_block_item(Node *node) {
+  gen_stmt(node->body);
+}
+
+// emit statemnt in block 
+static void gen_block(Node *node) {
+  enter_scope();
+  Node *stmt = node->body;
+  while(stmt) {
+    gen_stmt(stmt);
+    stmt = stmt->next;
+  }
+  leave_scope();
+}
+
+// emit num + num
+static llvm::Value *gen_math_add(Type *result_ty, llvm::Value *L, llvm::Value *R) {
+  if (is_flonum(result_ty)) {
+    return Builder->CreateFAdd(L, R);
+  } 
+
+  if (result_ty->is_unsigned) {
+    return Builder->CreateNUWAdd(L, R);
+  }
+  return Builder->CreateNSWAdd(L, R);
+}
+
+// emit ptr + num or addr + num
+static llvm::Value *gen_addr_add(Node *addr, llvm::Value *L, llvm::Value *R) {
+  return nullptr;
+}
+
+// emit add operation
+static llvm::Value *gen_add(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
+
+  if (node->o_kind == PTR_NUM) {
+    // ptr + num -> GEP(ptr, num)
+    // arr + num -> GEP(arr, 0, num)
+    return gen_addr_add(node->lhs, L, R);
+  }
+  return gen_math_add(node->ty, L, R);
+}
+
+// emit cast value by type
+static llvm::Value *emit_cast(llvm::Value *V, Type *from, Type *to) {
+  return V;
+}
+
+// emit cast expression
+static llvm::Value *gen_cast(Node *node) {
+  llvm::Value *V = gen_expr(node->lhs);
+  Type *from_type = node->lhs->ty;
+  Type *to_type = node->rhs->ty;
+  return emit_cast(V, from_type, to_type);
+}
+
+// emit variable address
+static llvm::Value *gen_var_addr(Obj *var) {
+  if (var->is_local) {
+    // get local variable
+    return find_var(var);
+  }
+  return nullptr;
+}
+
+// emit node adderss
+static llvm::Value *gen_addr(Node *node) {
+  switch(node->kind) {
+  case ND_VAR:
+    return gen_var_addr(node->var);
+  }
+}
+
+// emit load var value
+static llvm::Value *gen_var_value(Node *node) {
+  Obj *var = node->var;
+  llvm::Value *addr = gen_addr(node);
+  Type *ty = var->ty;
+  return emit_load(ty, addr); 
+}
+
+// emit all expression
+static llvm::Value *gen_expr(Node *node) {
+  dump_node("gen_expr", node);
+  llvm::Value *V = nullptr;
+  switch (node->kind)
+  {
+  case ND_NULL_EXPR:
+      break;
+  case ND_CAST:
+    V = gen_cast(node);
+  case ND_VAR:
+    V = gen_var_value(node);
+  default:
+    break;
+  }
+  return V;
+}
+
+static void gen_stmt(Node *node) {
+  dump_node("gen_stmt", node);
+  switch(node->kind) {
+  case ND_BLOCK_ITEM:
+    gen_block_item(node);
+    break;
+  
+  case ND_BLOCK:
+    gen_block(node);
+    break;
+
+  case ND_EXPR_STMT:
+    gen_expr(node->lhs);
+    break;
+
+  default:
+    std::cout << "Unimplemented kind: " << node->kind << std::endl;
+  }
+}
+
+//
+//= emit function llvm ir
+//
 
 static llvm::Type *create_return_type(Type *return_ty) {
   llvm::Type *retTy = create_type(return_ty);
@@ -412,86 +586,8 @@ static void emit_function(Obj *fn) {
   }
 }
 
-static void gen_block_item(Node *node) {
-  gen_stmt(node->body);
-}
-
-static void gen_block(Node *node) {
-  enter_scope();
-  bool is_goto = false;
-  for (Node *n = node->body; n; n = n->next) {
-    // last stmt is goto, current is not label, ingore next stmt
-    if (is_goto && n->kind != ND_LABEL && n->kind != ND_CASE) {
-       break;
-    }
-    gen_stmt(n);
-    is_goto = n->kind == ND_GOTO;
-  }
-  leave_scope();
-}
-
-static llvm::Value *gen_add_2(Node *node,
-    llvm::Value *operandL, llvm::Value *operandR) {
-  llvm::Value *V = nullptr;
-
-  if (is_flonum(node->ty)) {
-    return Builder->CreateFAdd(operandL, operandR);
-  }
-
-  if (node->ty->is_unsigned) {
-    V = Builder->CreateNUWAdd(operandL, operandR);
-  } else {
-    V = Builder->CreateNSWAdd(operandL, operandR);
-  }
-  return V;
-}
-
-
-static llvm::Value *gen_add(Node *node) {
-  llvm::Value *operandL, *operandR;
-  operandL = gen_expr(node->lhs);
-  operandR = gen_expr(node->rhs);
-  return nullptr;
-}
-
-static llvm::Value *gen_expr(Node *node) {
-  llvm::Value *V = nullptr;
-  switch (node->kind)
-  {
-  case ND_ADD:
-    V = gen_add(node);
-    break;
-  
-  default:
-    break;
-  }
-  return V;
-}
-
-static void gen_stmt(Node *node) {
-  switch(node->kind) {
-  case ND_BLOCK_ITEM:
-    gen_block_item(node);
-    break;
-  
-  case ND_BLOCK:
-    gen_block(node);
-    break;
-
-  case ND_EXPR_STMT:
-    gen_expr(node->lhs);
-    break;
-
-  default:
-    std::cout << "Unimplemented kind: " << node->kind << std::endl;
-  }
-}
-
 void gen_ir(Obj *prog, const std::string &filename) {
   InitializeModule(filename);
-  if (DUMP_OBJ) {
-    dump_obj(prog);
-  }
   emit_data(prog);
   emit_function(prog);
 

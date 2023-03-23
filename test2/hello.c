@@ -1,5 +1,13 @@
 #include "test.h"
 
+int sum(int a, int b) {
+  int c;
+  int d;
+  a + b;
+  //d = c + 5;
+  return d;
+}
+
 struct T0 {
   char a;
   int b : 5;

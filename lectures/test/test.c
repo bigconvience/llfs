@@ -1,7 +1,6 @@
-int sum(int a, int b) {
+int sum(int a) {
 	int c;
-	int d;
-	c = a + b;
-	d = c + 5;
-  return d;
+	a;
+	c;
+	return -1024;
 }
