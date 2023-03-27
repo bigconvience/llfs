@@ -18,6 +18,7 @@
 
 #define DUMP_OBJ 0
 #define DUMP_NODE 1
+#define DUMP_SCOPE 1
 
 //
 //= llvm framework utils
@@ -55,17 +56,23 @@ static void enter_scope(void) {
   BlockScope *sc = new BlockScope();
   sc->next = scope;
   scope = sc;
+  if (DUMP_SCOPE) {
+    std::cout << "enter_scope: "<< std::endl;
+  }
 }
 
 static void leave_scope(void) {
   scope = scope->next;
+  if (DUMP_SCOPE) {
+    std::cout << "leave_scope: " << std::endl;
+  }
 }
 
 static std::string get_scope_name(Obj *var) {
   std::string var_name = var->name;
   if (var->is_local) {
     int scope_level = var->scope_level;
-    var_name.append("..");
+    var_name.append(".");
     var_name.append(std::to_string(scope_level));
   }
   return var_name;
@@ -73,11 +80,17 @@ static std::string get_scope_name(Obj *var) {
 
 static void push_var(Obj *var, llvm::Value *v) {
   std::string var_name = get_scope_name(var);
+  if (DUMP_SCOPE) {
+    std::cout << "push_var: " << var_name << std::endl;
+  }
   scope->vars[var_name] = v;
 }
 
 static llvm::Value *find_var(Obj *var) {
   std::string var_name = get_scope_name(var);
+  if (DUMP_SCOPE) {
+    std::cout << "find_var: " << var_name << std::endl;
+  }
   for (BlockScope *sc = scope; sc; sc = sc->next) {
     llvm::Value *v = sc->vars[var_name];
     if (v) {
@@ -303,6 +316,7 @@ static void gen_block_item(Node *node);
 
 static llvm::Value *gen_expr(Node *node);
 static llvm::Value *gen_add(Node *node);
+static llvm::Value *gen_sub(Node *node);
 static llvm::Value *gen_cast(Node *node);
 
 // emit num + num
@@ -312,13 +326,13 @@ static llvm::Value *gen_math_add(Type *result_ty, llvm::Value *L, llvm::Value *R
   } 
 
   if (result_ty->is_unsigned) {
-    return Builder->CreateNUWAdd(L, R);
+    return Builder->CreateAdd(L, R);
   }
   return Builder->CreateNSWAdd(L, R);
 }
 
 // emit ptr + num or addr + num
-static llvm::Value *gen_addr_add(Node *addr, llvm::Value *L, llvm::Value *R) {
+static llvm::Value *gen_addr_add_offset(Node *addr, llvm::Value *L, llvm::Value *R) {
   return nullptr;
 }
 
@@ -330,9 +344,47 @@ static llvm::Value *gen_add(Node *node) {
   if (node->o_kind == PTR_NUM) {
     // ptr + num -> GEP(ptr, num)
     // arr + num -> GEP(arr, 0, num)
-    return gen_addr_add(node->lhs, L, R);
+    return gen_addr_add_offset(node->lhs, L, R);
   }
   return gen_math_add(node->ty, L, R);
+}
+
+// emit ptr/addr - num
+static llvm::Value *gen_addr_sub_offset(Node *addr, llvm::Value *L, llvm::Value *R) {
+  return nullptr;
+}
+
+// emit ptr - ptr
+static llvm::Value *gen_addr_sub(Node *addr, llvm::Value *L, llvm::Value *R) {
+  return nullptr;
+}
+
+// emit num - num
+static llvm::Value *gen_math_sub(Type *result_ty, llvm::Value *L, llvm::Value *R) {
+  if (is_flonum(result_ty)) {
+    return Builder->CreateFSub(L, R);
+  } 
+
+  if (result_ty->is_unsigned) {
+    return Builder->CreateSub(L, R);
+  }
+  return Builder->CreateNSWSub(L, R);
+}
+
+// emit sub operation
+static llvm::Value *gen_sub(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
+ 
+  if (node->o_kind == PTR_PTR) {
+    return gen_addr_sub(node, L, R);
+  }
+
+  if (node->o_kind == PTR_NUM) {
+    return gen_addr_sub_offset(node, L, R);
+  }
+
+  return gen_math_sub(node->ty, L, R);
 }
 
 // declaration or statement
@@ -360,7 +412,7 @@ static llvm::Value *emit_cast(llvm::Value *V, Type *from, Type *to) {
 static llvm::Value *gen_cast(Node *node) {
   llvm::Value *V = gen_expr(node->lhs);
   Type *from_type = node->lhs->ty;
-  Type *to_type = node->rhs->ty;
+  Type *to_type = node->ty;
   return emit_cast(V, from_type, to_type);
 }
 
@@ -402,6 +454,12 @@ static llvm::Value *gen_expr(Node *node) {
     break;
   case ND_VAR:
     V = gen_var_value(node);
+    break;
+  case ND_ADD:
+    V = gen_add(node);
+    break;
+  case ND_SUB:
+    V = gen_sub(node);
     break;
   default:
     break;

@@ -989,7 +989,7 @@ static llvm::Value *gen_add_2(Node *node,
   }
 
   if (node->ty->is_unsigned) {
-    V = Builder->CreateNUWAdd(operandL, operandR);
+    V = Builder->CreateAdd(operandL, operandR);
   } else {
     V = Builder->CreateNSWAdd(operandL, operandR);
   }
@@ -1036,7 +1036,7 @@ static llvm::Value *gen_sub(Node *node) {
   }
 
   if (node->ty->is_unsigned) {
-    V = Builder->CreateNUWSub(operandL, operandR);
+    V = Builder->CreateSub(operandL, operandR);
   } else {
     V = Builder->CreateNSWSub(operandL, operandR);
   }
