@@ -139,6 +139,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(Token *tok, Type *basety, VarAttr *attr);
 static void add_o_kind(Node *node);
 static Node *new_prefix(Node *node, Token *tok, int addend);
+static void write_lvar_data(Initializer *init, Obj *var);
 
 static int align_down(int n, int align) {
   return align_to(n - align + 1, align);
@@ -1426,8 +1427,11 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   lhs->var = var;
   lhs->var->init = init;
   Node *rhs = nullptr;
-  if (is_compound_type(var->ty) && is_const_initializer(init)) {
+  bool is_compound = is_compound_type(var->ty);
+  bool is_const_init = is_const_initializer(init);
+  if (is_compound && is_const_initializer) {
     rhs = new_node(ND_NULL_EXPR, tok);
+    write_lvar_data(init, var);
   } else {
     rhs = create_lvar_init(init, var->ty, &desg, tok);
   }
@@ -1524,6 +1528,14 @@ write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int off
   rel->addend = val;
   cur->next = rel;
   return cur->next;
+}
+
+static void write_lvar_data(Initializer *init, Obj *var) {
+    Relocation head = {};
+    char *buf = (char *)calloc(1, var->ty->size);
+    write_gvar_data(&head, init, var->ty, buf, 0);
+    var->init_data = buf;
+    var->rel = head.next;
 }
 
 // Initializers for global variables are evaluated at compile-time and
@@ -2033,8 +2045,10 @@ bool is_const_initializer(Initializer *init) {
       }
     }
   }
-
-  return is_const_expr(init->expr);
+  if (init->expr) {
+    return is_const_expr(init->expr);
+  }
+  return true;
 }
 
 bool is_const_expr(Node *node) {

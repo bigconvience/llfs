@@ -66,7 +66,8 @@ static llvm::Constant *gen_literal(Node *node);
 static llvm::GlobalValue::LinkageTypes yuc2LinkageType(Obj *yucNode);
 std::string get_struct_name(Type *ctype, bool packed);
 static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type, Type *ctype);
-
+static llvm::StructType *get_init_struct_type(Type *ctype);
+static llvm::Constant *init_struct(llvm::StructType *type, Type *ctype, char *buf);
 
 enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
 
@@ -1286,25 +1287,10 @@ static llvm::Value *emit_assign_struct(Node *node) {
 
 
 static llvm::Constant *gen_struct_literal(Obj *var) {
-  output << buildSeperator(stmt_level, "gen_struct_literal start:") 
-      << std::endl;
-
   Type *var_type = var->ty;
-  llvm::StructType *Ty = ConvertRecordDeclType(var_type);
-
-  llvm::SmallVector<llvm::Constant *, 16> Elements;
-  unsigned NumElements = getMemberCount(var_type);
-  Elements.reserve(NumElements);
-
-  Initializer *init = var->init;
-  int index = 0; 
-  for (Member *member = var_type->members; member; member = member->next) {
-    Initializer *child = init->children[member->idx];
-    llvm::Constant *child_value = gen_literal(child->expr);
-    Elements.push_back(child_value);
-  }
-
-  return llvm::ConstantStruct::get(Ty, Elements);
+  char *buf = var->init_data;
+  llvm::StructType *type = get_init_struct_type(var_type);
+  return init_struct(type, var_type, buf);
 }
 
 static llvm::Constant *gen_literal(Node *node) {
@@ -1357,13 +1343,15 @@ static llvm::Value *gen_memzero(Node *node) {
   if (!var) {
     return operandR;
   }
-  if (!is_const_initializer(var->init) || !is_struct(var->ty)) {
+  bool is_struct_ty = is_struct(var->ty);
+  bool is_const_value = is_const_initializer(var->init);
+  output << buildSeperator(stmt_level, "gen_memzero start:") 
+    << " is_struct: " << is_struct_ty
+    << " is_const_init: " << is_const_value
+    << std::endl;
+  if (!is_const_value || !is_struct_ty) {
     return operandR;
   }
-  output << buildSeperator(stmt_level, "gen_memzero start:") 
-      << " is_struct: " << is_struct(var->ty)
-      << " is_const_init: " << is_const_initializer(var->init)
-      << std::endl;
   operandR = gen_literal(node);
   llvm::GlobalVariable * global_var = gen_const_variable(var, operandR);
 
@@ -1516,16 +1504,21 @@ static llvm::Value *gen_shr(Node *node) {
   return V;
 }
 
-static llvm::Value *gen_number(Node *node) {
+static llvm::Constant *gen_number_for_type(llvm::Type *type, Node *node) {
   Type *nodeType = node->ty;
   if (is_integer(nodeType)) {
     uint64_t val = node->val;
     output << buildSeperator(stmt_level, "gen_number int:") << val << std::endl; 
-    return llvm::ConstantInt::get(yuc2LLVMType(nodeType), val);
+    return llvm::ConstantInt::get(type, val);
   }
   long double fval = node->fval;
   output << buildSeperator(stmt_level, "gen_number double:") << fval << std::endl; 
-  return llvm::ConstantFP::get(yuc2LLVMType(nodeType), fval);
+  return llvm::ConstantFP::get(type, fval);
+}
+
+static llvm::Value *gen_number(Node *node) {
+  Type *nodeType = node->ty;
+  return gen_number_for_type(yuc2LLVMType(nodeType), node);
 }
 
 static llvm::Value *gen_neg(Node *node) {
@@ -2172,12 +2165,19 @@ static llvm::Type *yuc2LLVMType(Type *ctype) {
   return type;
 }
 
-llvm::Type *create_init_type(Type *ctype) {
+static llvm::Type *get_init_type(Type *ctype) {
   llvm::Type *normal_type = yuc2LLVMType(ctype);
   if (ctype->has_bitfield) {
     return find_packed_tag(ctype);
   }
   return normal_type;
+}
+
+static llvm::StructType *get_init_struct_type(Type *ctype) {
+  if (ctype->has_bitfield) {
+    return find_packed_tag(ctype);
+  }
+  return find_tag(ctype);
 }
 
 llvm::Constant *create_initializer(llvm::Type *origin_type, Obj *var) {
@@ -2393,7 +2393,7 @@ llvm::Constant *EmitRecordInitialization(llvm::StructType *Ty, Type *ctype, char
   return llvm::ConstantStruct::get(Ty, Elements);
 }
 
-llvm::Constant *init_struct(llvm::StructType *type, Type *ctype, char *buf) {
+static llvm::Constant *init_struct(llvm::StructType *type, Type *ctype, char *buf) {
   if (ctype->has_bitfield) {
     return init_bitfield_struct(type, ctype, buf);
   }
@@ -2631,7 +2631,7 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
 	}
 
   output << "createGlobalVar name:" << name << std::endl;
-  llvm::Type *DesiredType = create_init_type(ctype);
+  llvm::Type *DesiredType = get_init_type(ctype);
   TheModule->getOrInsertGlobal(name, DesiredType);
   llvm::GlobalVariable *gVar = TheModule->getNamedGlobal(name);
   gVar->setAlignment(llvm::MaybeAlign(yucNode->align));
