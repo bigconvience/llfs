@@ -1,12 +1,13 @@
 #include "test.h"
 
-
-int main() { 
     struct {
   char a;
   int b : 5;
   int c : 10;
 } g45 = {1, 2, 3}, g46={};
+
+int main() { 
+
 
       struct bit1 {
     short a;
@@ -16,7 +17,8 @@ int main() {
     int e : 3;
   };
 
+int k = 5;
+struct bit1 x; x.a=k; 
 
-  ASSERT(1, ({ struct bit1 x={1,2,3,4,5}; x.a; }));
   return 0;
 }

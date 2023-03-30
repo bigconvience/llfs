@@ -387,6 +387,38 @@ static llvm::Value *gen_sub(Node *node) {
   return gen_math_sub(node->ty, L, R);
 }
 
+// emit add operation
+static llvm::Value *gen_mul(Node *node) {
+  llvm::Value *operandL, *operandR, *V;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  if (is_flonum(node->ty)) {
+    return Builder->CreateFMul(operandL, operandR);
+  }
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateMul(operandL, operandR);
+  } else {
+    V = Builder->CreateNSWMul(operandL, operandR);
+  }
+  return V;
+}
+
+// emit div
+static llvm::Value *gen_div(Node *node) {
+  llvm::Value *operandL, *operandR, *V;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  if (is_flonum(node->ty)) {
+    return Builder->CreateFDiv(operandL, operandR);
+  }
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateUDiv(operandL, operandR);
+  } else {
+    V = Builder->CreateSDiv(operandL, operandR);
+  }
+  return V;
+}
+
 // declaration or statement
 static void gen_block_item(Node *node) {
   Node *stmt = node->body;
@@ -460,6 +492,12 @@ static llvm::Value *gen_expr(Node *node) {
     break;
   case ND_SUB:
     V = gen_sub(node);
+    break;
+  case ND_MUL:
+    V = gen_mul(node);
+    break;
+  case ND_DIV:
+    V = gen_div(node);
     break;
   default:
     break;
