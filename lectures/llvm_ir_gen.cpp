@@ -389,47 +389,39 @@ static llvm::Value *gen_sub(Node *node) {
 
 // emit add operation
 static llvm::Value *gen_mul(Node *node) {
-  llvm::Value *operandL, *operandR, *V;
-  operandL = gen_expr(node->lhs);
-  operandR = gen_expr(node->rhs);
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
   if (is_flonum(node->ty)) {
-    return Builder->CreateFMul(operandL, operandR);
+    return Builder->CreateFMul(L, R);
   }
   if (node->ty->is_unsigned) {
-    V = Builder->CreateMul(operandL, operandR);
-  } else {
-    V = Builder->CreateNSWMul(operandL, operandR);
-  }
-  return V;
+    return Builder->CreateMul(L, R);
+  } 
+  return Builder->CreateNSWMul(L, R);
 }
 
 // emit div
 static llvm::Value *gen_div(Node *node) {
-  llvm::Value *operandL, *operandR, *V;
-  operandL = gen_expr(node->lhs);
-  operandR = gen_expr(node->rhs);
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
   if (is_flonum(node->ty)) {
-    return Builder->CreateFDiv(operandL, operandR);
+    return Builder->CreateFDiv(L, R);
   }
   if (node->ty->is_unsigned) {
-    V = Builder->CreateUDiv(operandL, operandR);
-  } else {
-    V = Builder->CreateSDiv(operandL, operandR);
-  }
-  return V;
+    return Builder->CreateUDiv(L, R);
+  } 
+  return Builder->CreateSDiv(L, R);
 }
 
 // emit mode
 static llvm::Value *gen_mod(Node *node) {
-  llvm::Value *operandL, *operandR, *V;
-  operandL = gen_expr(node->lhs);
-  operandR = gen_expr(node->rhs);
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
+
   if (node->ty->is_unsigned) {
-    V = Builder->CreateURem(operandL, operandR);
-  } else {
-    V = Builder->CreateSRem(operandL, operandR);
-  }
-  return V;
+    return Builder->CreateURem(L, R);
+  } 
+  return Builder->CreateSRem(L, R);
 }
 
 // declaration or statement
