@@ -605,6 +605,10 @@ static llvm::BasicBlock *getBasicBlock(char *label) {
   return BB;
 }
 
+static llvm::Value* gen_load(llvm::Value *addr) {
+  return Builder->CreateLoad(addr->getType()->getNonOpaquePointerElementType(), addr);
+}
+
 static llvm::Value* load(Type *ty, llvm::Value *originValue) {
   llvm::Type *type = yuc2LLVMType(ty);
   llvm::Value *V = Builder->CreateLoad(type, originValue);
@@ -1052,7 +1056,7 @@ static llvm::Value *gen_mul(Node *node) {
     return Builder->CreateFMul(operandL, operandR);
   }
   if (node->ty->is_unsigned) {
-    V = Builder->CreateNUWMul(operandL, operandR);
+    V = Builder->CreateMul(operandL, operandR);
   } else {
     V = Builder->CreateNSWMul(operandL, operandR);
   }
@@ -1363,6 +1367,22 @@ static llvm::Value *gen_memzero(Node *node) {
   return dest;
 }
 
+static llvm::Value *gen_bitfield_value(llvm::Value *member_addr, llvm::Value *rhs, Node *node) {
+  Node *lhs = node->lhs;
+  Member *member = lhs->member;
+  llvm::Value *member_value = gen_load(member_addr);
+  
+  // get masked bitfield value
+  int bit_offset = member->real_type_size * 8 - member->bit_width - member->lhs_bits;
+  long mask = ((1L << member->bit_width) - 1) << bit_offset;
+  output << "mask: " << ~mask << std::endl;
+  llvm::Value *member_mask = Builder->getInt32(~mask);
+  llvm::Value *masked_value = Builder->CreateAnd(member_value, member_mask);
+  
+
+  return masked_value;
+}
+
 static llvm::Value *gen_assign(Node *node) {
   Node *lhs = node->lhs;
   output << buildSeperator(stmt_level, "gen_assign start:") 
@@ -1375,6 +1395,9 @@ static llvm::Value *gen_assign(Node *node) {
   llvm::Value *operandL, *operandR;
   operandL = gen_addr(node->lhs);
   operandR = gen_expr(node->rhs);
+  if (node->lhs->kind == ND_MEMBER) {
+    operandR = gen_bitfield_value(operandL, operandR, node);
+  }
   genStore(operandR, operandL);
   if (is_const_expr(lhs)) {
      push_constant(lhs->var, operandR);

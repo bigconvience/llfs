@@ -419,6 +419,19 @@ static llvm::Value *gen_div(Node *node) {
   return V;
 }
 
+// emit mode
+static llvm::Value *gen_mod(Node *node) {
+  llvm::Value *operandL, *operandR, *V;
+  operandL = gen_expr(node->lhs);
+  operandR = gen_expr(node->rhs);
+  if (node->ty->is_unsigned) {
+    V = Builder->CreateURem(operandL, operandR);
+  } else {
+    V = Builder->CreateSRem(operandL, operandR);
+  }
+  return V;
+}
+
 // declaration or statement
 static void gen_block_item(Node *node) {
   Node *stmt = node->body;
@@ -498,6 +511,9 @@ static llvm::Value *gen_expr(Node *node) {
     break;
   case ND_DIV:
     V = gen_div(node);
+    break;
+  case ND_MOD:
+    V = gen_mod(node);
     break;
   default:
     break;

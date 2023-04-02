@@ -18,7 +18,7 @@ int main() {
   };
 
 int k = 5;
-struct bit1 x; x.a=k; 
+struct bit1 x; x.c=12; 
 
   return 0;
 }
