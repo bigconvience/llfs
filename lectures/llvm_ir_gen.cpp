@@ -337,10 +337,7 @@ static llvm::Value *gen_addr_add_offset(Node *addr, llvm::Value *L, llvm::Value 
 }
 
 // emit add operation
-static llvm::Value *gen_add(Node *node) {
-  llvm::Value *L = gen_expr(node->lhs);
-  llvm::Value *R = gen_expr(node->rhs);
-
+static llvm::Value *gen_add(Node *node, llvm::Value *L, llvm::Value *R) {
   if (node->o_kind == PTR_NUM) {
     // ptr + num -> GEP(ptr, num)
     // arr + num -> GEP(arr, 0, num)
@@ -372,10 +369,7 @@ static llvm::Value *gen_math_sub(Type *result_ty, llvm::Value *L, llvm::Value *R
 }
 
 // emit sub operation
-static llvm::Value *gen_sub(Node *node) {
-  llvm::Value *L = gen_expr(node->lhs);
-  llvm::Value *R = gen_expr(node->rhs);
- 
+static llvm::Value *gen_sub(Node *node, llvm::Value *L, llvm::Value *R) {
   if (node->o_kind == PTR_PTR) {
     return gen_addr_sub(node, L, R);
   }
@@ -388,9 +382,7 @@ static llvm::Value *gen_sub(Node *node) {
 }
 
 // emit add operation
-static llvm::Value *gen_mul(Node *node) {
-  llvm::Value *L = gen_expr(node->lhs);
-  llvm::Value *R = gen_expr(node->rhs);
+static llvm::Value *gen_mul(Node *node, llvm::Value *L, llvm::Value *R) {
   if (is_flonum(node->ty)) {
     return Builder->CreateFMul(L, R);
   }
@@ -401,9 +393,7 @@ static llvm::Value *gen_mul(Node *node) {
 }
 
 // emit div
-static llvm::Value *gen_div(Node *node) {
-  llvm::Value *L = gen_expr(node->lhs);
-  llvm::Value *R = gen_expr(node->rhs);
+static llvm::Value *gen_div(Node *node, llvm::Value *L, llvm::Value *R) {
   if (is_flonum(node->ty)) {
     return Builder->CreateFDiv(L, R);
   }
@@ -414,10 +404,7 @@ static llvm::Value *gen_div(Node *node) {
 }
 
 // emit mode
-static llvm::Value *gen_mod(Node *node) {
-  llvm::Value *L = gen_expr(node->lhs);
-  llvm::Value *R = gen_expr(node->rhs);
-
+static llvm::Value *gen_mod(Node *node, llvm::Value *L, llvm::Value *R) {
   if (node->ty->is_unsigned) {
     return Builder->CreateURem(L, R);
   } 
@@ -482,6 +469,11 @@ static llvm::Value *gen_var_value(Node *node) {
 static llvm::Value *gen_expr(Node *node) {
   dump_node("gen_expr", node);
   llvm::Value *V = nullptr;
+  if (!node) {
+    return V;
+  }
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
   switch (node->kind)
   {
   case ND_NULL_EXPR:
@@ -493,19 +485,19 @@ static llvm::Value *gen_expr(Node *node) {
     V = gen_var_value(node);
     break;
   case ND_ADD:
-    V = gen_add(node);
+    V = gen_add(node, L, R);
     break;
   case ND_SUB:
-    V = gen_sub(node);
+    V = gen_sub(node, L, R);
     break;
   case ND_MUL:
-    V = gen_mul(node);
+    V = gen_mul(node, L, R);
     break;
   case ND_DIV:
-    V = gen_div(node);
+    V = gen_div(node, L, R);
     break;
   case ND_MOD:
-    V = gen_mod(node);
+    V = gen_mod(node, L, R);
     break;
   default:
     break;
