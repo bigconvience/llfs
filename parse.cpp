@@ -492,6 +492,10 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
         ty = typeof_specifier(&tok, tok->next);
       } else {
         ty = ty2;
+        if (ty2) {
+          // use typedef name as tag
+          ty->tag = ty2->name;
+        }
         tok = tok->next;
       }
 

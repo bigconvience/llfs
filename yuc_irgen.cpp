@@ -68,6 +68,7 @@ std::string get_struct_name(Type *ctype, bool packed);
 static llvm::StructType *create_packed_struct_type(llvm::StructType *normal_type, Type *ctype);
 static llvm::StructType *get_init_struct_type(Type *ctype);
 static llvm::Constant *init_struct(llvm::StructType *type, Type *ctype, char *buf);
+static llvm::Value *gen_assign_member(llvm::Value *member_addr, llvm::Value *rhs, Node *lhs);
 
 enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
 
@@ -538,7 +539,7 @@ static bool isAnnonVar(std::string &name) {
 }
 
 static bool is_anony_tag(std::string &name) {
-   int index = name.find(".tag..");
+  int index = name.find(".tag..");
   return index == 0; 
 }
 
@@ -577,6 +578,7 @@ static void dump_member(Member *member) {
         << " bit_offset: " << member->bit_offset
         << " bit_width: " << member->bit_width
         << " ty size: " << member->ty->size
+        << " real_type_size: " << member->real_type_size
         << std::endl;
 }
 
@@ -588,6 +590,7 @@ static void dump_ctype(Type *ctype) {
       << " has_bitfield: " << ctype->has_bitfield 
       << " is_typedef:" << ctype->is_typedef
       << " tag: " << suffix.data()
+      << " type name: " << get_ident(ctype->name)
       << " align:" << ctype->align << std::endl;
 }
 
@@ -788,18 +791,51 @@ static llvm::Value *gen_member_addr(Node *node) {
   return ptr;
 }
 
-static llvm::Value *gen_get_bitfield(Member *member, llvm::Value *value) {
-  llvm::Value *V = value;
-  V = Builder->CreateShl(V, member->lhs_bits);
-  V = Builder->CreateAShr(V, member->rhs_bits);
+static llvm::Value *gen_cast_bitfield(Member *member, llvm::Value *value) {
   Type *from_type = get_int_type(member->real_type_size);
   Type *to_type = member->ty;
-  V = cast(V, from_type, to_type);
+  return cast(value, from_type, to_type);
+}
+
+static llvm::Value *gen_trunc_bitfield(Member *member, llvm::Value *value) {
+  Type *to_type = get_int_type(member->real_type_size);
+  Type *from_type = member->ty;
+  return cast(value, from_type, to_type);
+}
+
+static llvm::Value *gen_get_bitfield(Member *member, llvm::Value *value) {
+  llvm::Value *V = Builder->CreateShl(value, member->lhs_bits);
+  V = Builder->CreateAShr(V, member->rhs_bits);
+  V = gen_cast_bitfield(member, V);
   return V;
 }
 
-static llvm::Value *gen_member(Node *node) {
+static llvm::Value *unify_assign_value(Node *node, llvm::Value *V) {
+  if (node->kind != ND_MEMBER) {
+    return V;
+  }
+
+  Member *member = node->member;
+  if (!member->is_bitfield) {
+    return V;
+  }
+  if (!node->ty->is_unsigned) {
+    // sigend: trunc digits
+    int offset = member->real_type_size * 8 - member->bit_width;
+    V = Builder->CreateShl(V, offset);
+    V = Builder->CreateAShr(V, offset);
+  }
+
+  return gen_cast_bitfield(member, V);
+}
+
+
+static llvm::Value *gen_member(Node *node, llvm::Value **target) {
+  output << buildSeperator(stmt_level, "gen_member start") << std::endl;
   llvm::Value *memberAddr = gen_member_addr(node);
+  if (target) { 
+    *target = memberAddr;
+  }
   Member *member = node->member;
   Type *ctype = node->lhs->ty;
   llvm::StructType *type = find_tag(ctype);
@@ -1080,23 +1116,41 @@ static llvm::Value *gen_div(Node *node) {
 
 static llvm::Value *gen_postfix(Node *node, bool isInc) {
   llvm::Value *targetAddr, *operandL, *operandR;
-  targetAddr = gen_addr(node->lhs);
-  operandL = load(node->lhs->ty, targetAddr);
-  operandR = gen_expr(node->rhs);
 
+  if (node->lhs->kind == ND_MEMBER) {
+    operandL = gen_member(node->lhs, &targetAddr);
+  } else {
+    targetAddr = gen_addr(node->lhs);
+    operandL = load(node->lhs->ty, targetAddr);
+  }
+  operandR = gen_expr(node->rhs);
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
-  genStore(sum, targetAddr);
+  
+  if (node->lhs->kind == ND_MEMBER) {
+    gen_assign_member(targetAddr, sum, node->lhs);
+  } else {
+    genStore(sum, targetAddr);
+  }
+
   return operandL;
 }
 
 static llvm::Value *gen_prefix(Node *node, bool isInc) {
   llvm::Value *targetAddr, *operandL, *operandR;
-  targetAddr = gen_addr(node->lhs);
-  operandL = load(node->lhs->ty, targetAddr);
+  if (node->lhs->kind == ND_MEMBER) {
+    operandL = gen_member(node->lhs, &targetAddr);
+  } else {
+    targetAddr = gen_addr(node->lhs);
+    operandL = load(node->lhs->ty, targetAddr);
+  }
   operandR = gen_expr(node->rhs);
-
   llvm::Value *sum = gen_add_2(node, operandL, operandR);
-  genStore(sum, targetAddr);
+  
+  if (node->lhs->kind == ND_MEMBER) {
+    sum = gen_assign_member(targetAddr, sum, node->lhs);
+  } else {
+    genStore(sum, targetAddr);
+  }
   return sum;
 }
 
@@ -1361,26 +1415,47 @@ static llvm::Value *gen_memzero(Node *node) {
 
   llvm::Value *operandL = gen_var_addr(var);
   operandL = uniform_address(operandL);
-
-  llvm::Value *dest = emit_memcpy(operandL, global_var, var->ty);
+  llvm::Value *src = uniform_address(global_var);
+  llvm::Value *dest = emit_memcpy(operandL, src, var->ty);
 
   return dest;
 }
 
-static llvm::Value *gen_bitfield_value(llvm::Value *member_addr, llvm::Value *rhs, Node *node) {
-  Node *lhs = node->lhs;
+static llvm::Value *gen_assign_member(llvm::Value *member_addr, llvm::Value *rhs, Node *lhs) {
   Member *member = lhs->member;
+  if (!member->is_bitfield) {
+    // store masked value to bit_field member
+    genStore(rhs, member_addr);
+    return rhs;
+  }
+  // trunc rhs
+  llvm::Value *R = gen_trunc_bitfield(member, rhs);
+  // load lhs
   llvm::Value *member_value = gen_load(member_addr);
+  // mask rhs
+  long rhs_mask = (1L << member->bit_width) - 1; 
+  llvm::Value *and_R = Builder->CreateAnd(R, rhs_mask);
   
   // get masked bitfield value
   int bit_offset = member->real_type_size * 8 - member->bit_width - member->lhs_bits;
-  long mask = ((1L << member->bit_width) - 1) << bit_offset;
-  output << "mask: " << ~mask << std::endl;
-  llvm::Value *member_mask = Builder->getInt32(~mask);
-  llvm::Value *masked_value = Builder->CreateAnd(member_value, member_mask);
-  
+  // shift left rhs
+  if (bit_offset > 0) {
+    R = Builder->CreateShl(and_R, bit_offset);
+  } else {
+    R = and_R;
+  }
 
-  return masked_value;
+  // mask lhs
+  long mask = ((1L << member->bit_width) - 1) << bit_offset;
+  llvm::Value *masked_value = Builder->CreateAnd(member_value, ~mask);
+  
+  // get final bitfield value
+  masked_value = Builder->CreateOr(masked_value, R);
+
+  // store masked value to bit_field member
+  genStore(masked_value, member_addr);
+
+  return unify_assign_value(lhs, and_R);
 }
 
 static llvm::Value *gen_assign(Node *node) {
@@ -1393,11 +1468,11 @@ static llvm::Value *gen_assign(Node *node) {
    return emit_assign_struct(node);
   }
   llvm::Value *operandL, *operandR;
-  operandL = gen_addr(node->lhs);
   operandR = gen_expr(node->rhs);
+  operandL = gen_addr(node->lhs);
   if (node->lhs->kind == ND_MEMBER) {
-    operandR = gen_bitfield_value(operandL, operandR, node);
-  }
+    return gen_assign_member(operandL, operandR, node->lhs);
+  } 
   genStore(operandR, operandL);
   if (is_const_expr(lhs)) {
      push_constant(lhs->var, operandR);
@@ -1601,7 +1676,7 @@ static llvm::Value *gen_expr(Node *node) {
       V = gen_var(node);
       break;
     case ND_MEMBER:
-      V = gen_member(node);
+      V = gen_member(node, nullptr);
       break;
     case ND_DEREF:
       V = gen_deref(node);
@@ -2303,6 +2378,7 @@ llvm::Constant *EmitArrayInitialization(llvm::ArrayType *Ty, Type *ArrayType, ch
 int get_grouped_bitfield_size(Member **rest, Member *member, int offset) {
   int bit_width = 0;
   while(member && member->is_bitfield && member->offset == offset) {
+    dump_member(member);
     bit_width += member->bit_width;
     member = member->next;
   }
@@ -2316,6 +2392,7 @@ llvm::Constant *init_bitfield_struct(llvm::StructType *type, Type *ctype, char *
 
   Member *member = ctype->members;
   int pre_index = -1;
+  int offset = 0;
   while(member) {
     Member *end;
     int index = member->type_idx;
@@ -2323,19 +2400,19 @@ llvm::Constant *init_bitfield_struct(llvm::StructType *type, Type *ctype, char *
       llvm::Type *memberTy = type->getTypeAtIndex(pre_index + 1);
       llvm::Constant *v = llvm::UndefValue::get(memberTy);
       elements.push_back(v);
-     }
+    }
 
     if (!member->is_bitfield) {
       llvm::Type *memberTy = type->getTypeAtIndex(index);
       llvm::Constant *v = buffer2Constants(memberTy, member->ty, NULL, buf, member->offset);
       elements.push_back(v);
       end = member->next;
+      offset = member->offset + member->ty->size;
     } else {
       size_t grouped_size = get_grouped_bitfield_size(&end, member, member->offset);
       llvm::Type *i8ty = Builder->getInt8Ty();
       int start_index = member->offset + member->bit_offset / 8;
-      output << "start_index: " << start_index 
-        << " grouped_size:" << grouped_size << std::endl;
+      offset = start_index + grouped_size;
       char *start = buf + start_index;
       for (int i = 0; i < grouped_size; i++) {
         llvm::Constant *v = llvm::ConstantInt::get(i8ty, read_buf(start + i, 1));
@@ -2346,12 +2423,12 @@ llvm::Constant *init_bitfield_struct(llvm::StructType *type, Type *ctype, char *
     member = end;
   }
 
-  if (pre_index + 1 < type->getNumElements()) {
-    llvm::Type *memberTy = type->getTypeAtIndex(pre_index + 1);
+  int delta = ctype->size - offset;
+  if (delta > 0) {
+    llvm::Type *memberTy = get_int_n_ty(delta);
     llvm::Constant *v = llvm::UndefValue::get(memberTy);
     elements.push_back(v);
   }
-
   llvm::StructType *packed_type = find_packed_tag(ctype);
   return llvm::ConstantStruct::get(packed_type, elements);
 }
