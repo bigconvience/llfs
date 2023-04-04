@@ -317,6 +317,15 @@ static void gen_block_item(Node *node);
 static llvm::Value *gen_expr(Node *node);
 static llvm::Value *gen_add(Node *node);
 static llvm::Value *gen_sub(Node *node);
+static llvm::Value *gen_mul(Node *node);
+static llvm::Value *gen_div(Node *node);
+static llvm::Value *gen_mod(Node *node);
+static llvm::Value *gen_bitand(Node *node);
+static llvm::Value *gen_bitor(Node *node);
+static llvm::Value *gen_bitxor(Node *node);
+static llvm::Value *gen_bitnot(Node *node);
+static llvm::Value *gen_shl(Node *node);
+static llvm::Value *gen_shr(Node *node);
 static llvm::Value *gen_cast(Node *node);
 
 // emit num + num
@@ -337,7 +346,9 @@ static llvm::Value *gen_addr_add_offset(Node *addr, llvm::Value *L, llvm::Value 
 }
 
 // emit add operation
-static llvm::Value *gen_add(Node *node, llvm::Value *L, llvm::Value *R) {
+static llvm::Value *gen_add(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
   if (node->o_kind == PTR_NUM) {
     // ptr + num -> GEP(ptr, num)
     // arr + num -> GEP(arr, 0, num)
@@ -369,7 +380,9 @@ static llvm::Value *gen_math_sub(Type *result_ty, llvm::Value *L, llvm::Value *R
 }
 
 // emit sub operation
-static llvm::Value *gen_sub(Node *node, llvm::Value *L, llvm::Value *R) {
+static llvm::Value *gen_sub(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
   if (node->o_kind == PTR_PTR) {
     return gen_addr_sub(node, L, R);
   }
@@ -382,7 +395,9 @@ static llvm::Value *gen_sub(Node *node, llvm::Value *L, llvm::Value *R) {
 }
 
 // emit add operation
-static llvm::Value *gen_mul(Node *node, llvm::Value *L, llvm::Value *R) {
+static llvm::Value *gen_mul(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
   if (is_flonum(node->ty)) {
     return Builder->CreateFMul(L, R);
   }
@@ -393,7 +408,9 @@ static llvm::Value *gen_mul(Node *node, llvm::Value *L, llvm::Value *R) {
 }
 
 // emit div
-static llvm::Value *gen_div(Node *node, llvm::Value *L, llvm::Value *R) {
+static llvm::Value *gen_div(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
   if (is_flonum(node->ty)) {
     return Builder->CreateFDiv(L, R);
   }
@@ -404,12 +421,59 @@ static llvm::Value *gen_div(Node *node, llvm::Value *L, llvm::Value *R) {
 }
 
 // emit mode
-static llvm::Value *gen_mod(Node *node, llvm::Value *L, llvm::Value *R) {
+static llvm::Value *gen_mod(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);  
   if (node->ty->is_unsigned) {
     return Builder->CreateURem(L, R);
   } 
   return Builder->CreateSRem(L, R);
 }
+
+// emit bit and
+static llvm::Value *gen_bitand(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);  
+  return Builder->CreateAnd(L, R);
+}
+
+// emit bit or
+static llvm::Value *gen_bitor(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);  
+  return Builder->CreateOr(L, R);
+}
+
+// emit bit xor
+static llvm::Value *gen_bitxor(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
+  return Builder->CreateXor(L, R);
+}
+
+// emit bit not
+static llvm::Value *gen_bitnot(Node *node) {
+  llvm::Value *operand = gen_expr(node->lhs);
+  return Builder->CreateXor(operand, -1);
+}
+
+// emit shift left
+static llvm::Value *gen_shl(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);  
+  return Builder->CreateShl(L, R);
+}
+
+// emit sheft right
+static llvm::Value *gen_shr(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);  
+  if (node->ty->is_unsigned) {
+    return Builder->CreateLShr(L, R);
+  } 
+  return Builder->CreateAShr(L, R);
+}
+
 
 // declaration or statement
 static void gen_block_item(Node *node) {
@@ -472,8 +536,6 @@ static llvm::Value *gen_expr(Node *node) {
   if (!node) {
     return V;
   }
-  llvm::Value *L = gen_expr(node->lhs);
-  llvm::Value *R = gen_expr(node->rhs);
   switch (node->kind)
   {
   case ND_NULL_EXPR:
@@ -485,19 +547,37 @@ static llvm::Value *gen_expr(Node *node) {
     V = gen_var_value(node);
     break;
   case ND_ADD:
-    V = gen_add(node, L, R);
+    V = gen_add(node);
     break;
   case ND_SUB:
-    V = gen_sub(node, L, R);
+    V = gen_sub(node);
     break;
   case ND_MUL:
-    V = gen_mul(node, L, R);
+    V = gen_mul(node);
     break;
   case ND_DIV:
-    V = gen_div(node, L, R);
+    V = gen_div(node);
     break;
   case ND_MOD:
-    V = gen_mod(node, L, R);
+    V = gen_mod(node);
+    break;
+  case ND_BITAND:
+    V = gen_bitand(node);
+    break;
+  case ND_BITOR:
+    V = gen_bitor(node);
+    break;
+  case ND_BITXOR:
+    V = gen_bitxor(node);
+    break;
+  case ND_BITNOT:
+    V = gen_bitnot(node);
+    break;
+  case ND_SHL:
+    V = gen_shl(node);
+    break;
+  case ND_SHR:
+    V = gen_shr(node);
     break;
   default:
     break;
