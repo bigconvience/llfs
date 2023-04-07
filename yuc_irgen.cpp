@@ -368,6 +368,18 @@ static std::string get_scope_name(Obj *var) {
   return var_name;
 }
 
+static std::string get_vla_stack_name(Obj *var) {
+  std::string var_name = get_scope_name(var);
+  var_name.append(".vla.stack");
+  return var_name;
+}
+
+static std::string get_vla_size_name(Obj *var) {
+  std::string var_name = get_scope_name(var);
+  var_name.append(".vla.size");
+  return var_name;
+}
+
 static std::string get_tag_name(Type *ty) {
   std::string tag_name = get_ident(ty->tag);
   tag_name.append(".");
@@ -375,8 +387,7 @@ static std::string get_tag_name(Type *ty) {
   return tag_name;
 }
 
-static llvm::Value *find_var(Obj *var) {
-  std::string var_name = get_scope_name(var);
+static llvm::Value *find_var_by_name(std::string var_name) {
   for (BlockScope *sc = scope; sc; sc = sc->next) {
     llvm::Value *v = sc->vars[var_name];
     if (v) {
@@ -384,6 +395,21 @@ static llvm::Value *find_var(Obj *var) {
     }
   }
   return nullptr;
+}
+
+static llvm::Value *find_var(Obj *var) {
+  std::string var_name = get_scope_name(var);
+  return find_var_by_name(var_name);
+}
+
+static llvm::Value *find_vla_stack(Obj *var) {
+  std::string var_name = get_vla_stack_name(var);
+  return find_var_by_name(var_name);
+}
+
+static llvm::Value *find_vla_size(Obj *var) {
+ std::string var_name = get_vla_size_name(var);
+  return find_var_by_name(var_name);
 }
 
 static void push_basicblock(std::string label, llvm::BasicBlock *BB) {
@@ -396,6 +422,16 @@ static llvm::BasicBlock *find_basicblock(std::string label) {
 
 static void push_var(Obj *var, llvm::Value *v) {
   std::string var_name = get_scope_name(var);
+  scope->vars[var_name] = v;
+}
+
+static void push_vla_stack(Obj *var, llvm::Value *v) {
+  std::string var_name = get_vla_stack_name(var);
+  scope->vars[var_name] = v;
+}
+
+static void push_vla_size(Obj *var, llvm::Value *v) {
+  std::string var_name = get_vla_size_name(var);
   scope->vars[var_name] = v;
 }
 
@@ -2867,13 +2903,53 @@ static bool is_builtin_name(std::string &name) {
       || name == "__va_area__";
 }
 
+static void print_type(Type *type) {
+  if (!type) {
+    return;
+  }
+  output << "Type kind: " << ctypeKindString(type->kind) 
+            << " align: " << type->align
+            << std::endl;
+}
+
+static void print_obj(Obj *obj) {
+  if (!obj) {
+    return;
+  }
+  output << "Obj name: " << obj->name 
+            << " align: " << obj->align
+            << std::endl;
+  print_type(obj->ty);
+}
+
+
+static void alloca_local_vla(Obj *local) {
+  int align = 8;
+
+  // alloca stacksave
+  llvm::Type *vla_stack_ty = llvm::PointerType::get(Builder->getInt8Ty(), 0);
+  llvm::AllocaInst *vla_stack_addr = Builder->CreateAlloca(vla_stack_ty, nullptr);
+  vla_stack_addr->setAlignment(llvm::Align(align));
+  push_vla_stack(local, vla_stack_addr);
+
+  // alloca vla size
+  llvm::AllocaInst *vla_size_addr = Builder->CreateAlloca(Builder->getInt64Ty(), nullptr);
+  vla_size_addr->setAlignment(llvm::Align(align));
+  push_vla_size(local, vla_size_addr);
+}
+
 static void alloca_local_var(Obj *local) {
   output << "alloca_local_var: " << std::endl;
   if (!local) {
     return;
   }
-  std::string varName = local->name;
+  print_obj(local);
   Type *ty = local->ty;
+  if (ty->kind == TY_VLA) {
+    alloca_local_vla(local);
+    return;
+  }
+  std::string varName = local->name;
   Obj *var = local;
   int align = get_align(var);
   llvm::Type *localType = getTypeForArg(ty);
