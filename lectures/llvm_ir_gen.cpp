@@ -327,6 +327,32 @@ static llvm::Value *gen_bitnot(Node *node);
 static llvm::Value *gen_shl(Node *node);
 static llvm::Value *gen_shr(Node *node);
 static llvm::Value *gen_cast(Node *node);
+static llvm::Value *gen_var_value(Node *node);
+
+static llvm::Value *gen_dummy(Node *node) {
+  return nullptr;
+}
+
+static llvm::Value *(*gen_table[ND_DUMMY])(Node *node) = {
+  [ND_NULL_EXPR] = gen_dummy,
+  [ND_CAST] = gen_cast,
+  [ND_VAR] = gen_var_value,
+
+  // math operation
+  [ND_ADD] = gen_add,
+  [ND_SUB] = gen_sub,
+  [ND_MUL] = gen_mul,
+  [ND_DIV] = gen_div,
+  [ND_MOD] = gen_mod,
+
+  // bitwise operation
+  [ND_BITAND] = gen_bitand,
+  [ND_BITOR] = gen_bitor,
+  [ND_BITXOR] = gen_bitxor,
+  [ND_BITNOT] = gen_bitnot,
+  [ND_SHL] = gen_shl,
+  [ND_SHR] = gen_shr,
+};
 
 // emit num + num
 static llvm::Value *gen_math_add(Type *result_ty, llvm::Value *L, llvm::Value *R) {
@@ -536,52 +562,7 @@ static llvm::Value *gen_expr(Node *node) {
   if (!node) {
     return V;
   }
-  switch (node->kind)
-  {
-  case ND_NULL_EXPR:
-    break;
-  case ND_CAST:
-    V = gen_cast(node);
-    break;
-  case ND_VAR:
-    V = gen_var_value(node);
-    break;
-  case ND_ADD:
-    V = gen_add(node);
-    break;
-  case ND_SUB:
-    V = gen_sub(node);
-    break;
-  case ND_MUL:
-    V = gen_mul(node);
-    break;
-  case ND_DIV:
-    V = gen_div(node);
-    break;
-  case ND_MOD:
-    V = gen_mod(node);
-    break;
-  case ND_BITAND:
-    V = gen_bitand(node);
-    break;
-  case ND_BITOR:
-    V = gen_bitor(node);
-    break;
-  case ND_BITXOR:
-    V = gen_bitxor(node);
-    break;
-  case ND_BITNOT:
-    V = gen_bitnot(node);
-    break;
-  case ND_SHL:
-    V = gen_shl(node);
-    break;
-  case ND_SHR:
-    V = gen_shr(node);
-    break;
-  default:
-    break;
-  }
+  V = gen_table[node->kind](node);
   return V;
 }
 
