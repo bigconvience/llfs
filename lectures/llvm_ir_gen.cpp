@@ -329,12 +329,10 @@ static llvm::Value *gen_shr(Node *node);
 static llvm::Value *gen_cast(Node *node);
 static llvm::Value *gen_var_value(Node *node);
 
-static llvm::Value *gen_dummy(Node *node) {
-  return nullptr;
-}
+static llvm::Value *gen_null(Node *node);
 
 static llvm::Value *(*gen_table[ND_DUMMY])(Node *node) = {
-  [ND_NULL_EXPR] = gen_dummy,
+  [ND_NULL_EXPR] = gen_null,
   [ND_CAST] = gen_cast,
   [ND_VAR] = gen_var_value,
 
@@ -553,6 +551,11 @@ static llvm::Value *gen_var_value(Node *node) {
   llvm::Value *addr = gen_addr(node);
   Type *ty = var->ty;
   return emit_load(ty, addr);
+}
+
+// emit null
+static llvm::Value *gen_null(Node *node) {
+  return nullptr;
 }
 
 // emit all expression
