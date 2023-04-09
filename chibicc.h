@@ -243,6 +243,7 @@ typedef enum {
   ND_PREFIX_INC, // ++prefix
   ND_PREFIX_DEC, // --prefix
   ND_SUBSCRIPT, // postfix arr[idx]
+  ND_DECL_VLA, // declare a vla
 } NodeKind;
 
 // operand kind
@@ -711,6 +712,8 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_PREFIX_DEC";
     case ND_SUBSCRIPT:
       return "ND_SUBSCRIPT";
+    case ND_DECL_VLA:
+      return "ND_DECL_VLA";
     default:
       return std::to_string(kind);
   }

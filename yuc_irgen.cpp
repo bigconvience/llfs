@@ -9,6 +9,7 @@
 #include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Instruction.h"
+#include "llvm/ADT/ArrayRef.h"
 
 #include <algorithm>
 #include <fstream>
@@ -16,7 +17,7 @@
 #include <vector>
 #include <map>
 
-#define DUMP_SCOPE 0
+#define DUMP_SCOPE 1
 
 static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
@@ -369,14 +370,10 @@ static std::string get_scope_name(Obj *var) {
 }
 
 static std::string get_vla_stack_name(Obj *var) {
-  std::string var_name = get_scope_name(var);
-  var_name.append(".vla.stack");
-  return var_name;
-}
-
-static std::string get_vla_size_name(Obj *var) {
-  std::string var_name = get_scope_name(var);
-  var_name.append(".vla.size");
+  std::string var_name = var->name;
+  var_name.append(".vla.stack..");
+  int scope_level = var->scope_level;
+  var_name.append(std::to_string(scope_level));
   return var_name;
 }
 
@@ -407,11 +404,6 @@ static llvm::Value *find_vla_stack(Obj *var) {
   return find_var_by_name(var_name);
 }
 
-static llvm::Value *find_vla_size(Obj *var) {
- std::string var_name = get_vla_size_name(var);
-  return find_var_by_name(var_name);
-}
-
 static void push_basicblock(std::string label, llvm::BasicBlock *BB) {
   sLabelBB[label] = BB;
 }
@@ -422,16 +414,9 @@ static llvm::BasicBlock *find_basicblock(std::string label) {
 
 static void push_var(Obj *var, llvm::Value *v) {
   std::string var_name = get_scope_name(var);
-  scope->vars[var_name] = v;
-}
-
-static void push_vla_stack(Obj *var, llvm::Value *v) {
-  std::string var_name = get_vla_stack_name(var);
-  scope->vars[var_name] = v;
-}
-
-static void push_vla_size(Obj *var, llvm::Value *v) {
-  std::string var_name = get_vla_size_name(var);
+  if (DUMP_SCOPE) {
+    output << "push_var:" << var_name << std::endl;
+  }
   scope->vars[var_name] = v;
 }
 
@@ -553,6 +538,7 @@ public:
 
   llvm::LLVMContext &getLLVMContext() { return VMContext; }
   llvm::Module &getModule() { return TheModule; }
+  llvm::Function *getIntrinsic(unsigned IID, llvm::ArrayRef<llvm::Type*> Tys = llvm::None);
 
   llvm::Type *getX86_FP80Ty() {
     return llvm::Type::getX86_FP80Ty(VMContext);
@@ -563,6 +549,12 @@ static std::unique_ptr<IRGenModule> ModuleBuilder;
 
 static IRGenModule &CGM() {
   return *ModuleBuilder;
+}
+
+llvm::Function *IRGenModule::getIntrinsic(unsigned IID,
+                                            llvm::ArrayRef<llvm::Type*> Tys) {
+  return llvm::Intrinsic::getDeclaration(&getModule(), (llvm::Intrinsic::ID)IID,
+                                         Tys);
 }
 
 
@@ -706,6 +698,33 @@ static llvm::Value *gen_subscript_addr(Node *node) {
 static llvm::Value *gen_subscript(Node *node) {
   llvm::Value *Addr = gen_subscript_addr(node);
   return load(node->ty, Addr); 
+}
+
+static llvm::Value *gen_decl_vla(Node *node) {
+  Obj *vla_var = node->lhs->var;
+  // load vla length
+  llvm::Value *vla_len = gen_expr(vla_var->ty->vla_len);
+  vla_len = Builder->CreateZExt(vla_len, Builder->getInt64Ty());
+  
+  // generate vla ptr
+  llvm::Value *L = gen_expr(node->lhs);
+  // alloca vla
+  llvm::Type *Ty = yuc2LLVMType(vla_var->ty);
+  llvm::AllocaInst *localAddr = Builder->CreateAlloca(Ty, vla_len);
+  localAddr->setAlignment(llvm::Align(16));
+  push_var(vla_var, localAddr);
+
+  return localAddr; 
+}
+
+static llvm::Value *gen_vla_ptr(Node *node) {
+  llvm::Function *F = CGM().getIntrinsic(llvm::Intrinsic::stacksave);
+  llvm::Value *V = Builder->CreateCall(F);
+  Obj *var = node->var;
+  llvm::Value *Stack = find_vla_stack(var);
+  Builder->CreateStore(V, Stack);
+
+  return V; 
 }
 
 // check able to cast to primitive type
@@ -1781,6 +1800,12 @@ static llvm::Value *gen_expr(Node *node) {
       break;
     case ND_SUBSCRIPT:
       V = gen_subscript(node);
+      break;
+    case ND_DECL_VLA:
+      V = gen_decl_vla(node);
+      break;
+    case ND_VLA_PTR:
+      V = gen_vla_ptr(node);
       break;
     default:
       break;
@@ -2922,22 +2947,6 @@ static void print_obj(Obj *obj) {
   print_type(obj->ty);
 }
 
-
-static void alloca_local_vla(Obj *local) {
-  int align = 8;
-
-  // alloca stacksave
-  llvm::Type *vla_stack_ty = llvm::PointerType::get(Builder->getInt8Ty(), 0);
-  llvm::AllocaInst *vla_stack_addr = Builder->CreateAlloca(vla_stack_ty, nullptr);
-  vla_stack_addr->setAlignment(llvm::Align(align));
-  push_vla_stack(local, vla_stack_addr);
-
-  // alloca vla size
-  llvm::AllocaInst *vla_size_addr = Builder->CreateAlloca(Builder->getInt64Ty(), nullptr);
-  vla_size_addr->setAlignment(llvm::Align(align));
-  push_vla_size(local, vla_size_addr);
-}
-
 static void alloca_local_var(Obj *local) {
   output << "alloca_local_var: " << std::endl;
   if (!local) {
@@ -2946,7 +2955,6 @@ static void alloca_local_var(Obj *local) {
   print_obj(local);
   Type *ty = local->ty;
   if (ty->kind == TY_VLA) {
-    alloca_local_vla(local);
     return;
   }
   std::string varName = local->name;

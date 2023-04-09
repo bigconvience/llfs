@@ -333,6 +333,11 @@ static char *new_tag_name(void) {
   return format(".tag..%d", id++);
 }
 
+static char *new_vla_size_name(void) {
+  static int id = 0;
+  return format(".vla_size..%d", id++);
+}
+
 static Token *new_token_tag() {
   char *tag_name = new_tag_name();
   Token *tag = new Token();
@@ -356,6 +361,30 @@ static char *get_ident(Token *tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "expected an identifier");
   return strndup(tok->loc, tok->len);
+}
+
+static std::string get_scope_name(std::string var_name) {
+  var_name.append("..");
+  var_name.append(std::to_string(scope_level));
+  return var_name;
+}
+
+static char* get_vla_size_name(Token *tok) {
+  std::string var_name = get_ident(tok);
+  var_name.append(".vla.size");
+
+  char *cstr = new char[var_name.length() + 1];
+  std::strcpy(cstr, var_name.c_str());
+  return cstr;
+}
+
+static char* get_vla_stack_name(Token *tok) {
+  std::string var_name = get_ident(tok);
+  var_name.append(".vla.stack");
+
+  char *cstr = new char[var_name.length() + 1];
+  std::strcpy(cstr, var_name.c_str());
+  return cstr;
 }
 
 static Type *find_typedef(Token *tok) {
@@ -855,7 +884,13 @@ static Node *compute_vla_size(Type *ty, Token *tok) {
   else
     base_sz = new_num(ty->base->size, tok);
 
-  ty->vla_size = new_lvar("", ty_ulong);
+  if (ty->name) {
+    new_lvar(get_vla_stack_name(ty->name), pointer_to(ty_char));
+  }
+  // ty->vla_size = new_lvar("", ty_ulong);
+  ty->vla_size = new_lvar(new_vla_size_name(), ty_ulong);
+
+  // return node;
   Node *expr = new_binary(ND_ASSIGN, new_var_node(ty->vla_size, tok),
                           new_binary(ND_MUL, ty->vla_len, base_sz, tok),
                           tok);
@@ -925,8 +960,7 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
       // x = alloca(tmp)`.
       Obj *var = new_lvar(get_ident(ty->name), ty);
       Token *tok = ty->name;
-      Node *expr = new_binary(ND_ASSIGN, new_vla_ptr(var, tok),
-                              new_alloca(new_var_node(ty->vla_size, tok)),
+      Node *expr = new_unary(ND_DECL_VLA, new_vla_ptr(var, tok),
                               tok);
 
       cur = cur->next = new_unary(ND_EXPR_STMT, expr, tok);
