@@ -816,6 +816,7 @@ llvm::Value *gen_deref(Node *node) {
     V = gen_get_ptr(node, V, getOffset(0));
     break;
   case TY_STRUCT:
+  case TY_VLA:
     break;
   default:
     V = load(node->ty, V);
@@ -1688,7 +1689,7 @@ static llvm::Value *gen_neg(Node *node) {
 }
 
 static llvm::Value *gen_expr(Node *node) {
-  int cur_level = ++stmt_level;
+  int cur_level = stmt_level;
   NodeKind kind = node->kind;
   std::string kindStr = node_kind_info(kind);
   Type* nodeType = node->ty;
@@ -1698,6 +1699,7 @@ static llvm::Value *gen_expr(Node *node) {
   cur_level++;
   llvm::Value *casted = nullptr;
   llvm::Value *operandL, *operandR;
+  ++stmt_level;
   switch(kind) {
     case ND_NULL_EXPR:
       break;
