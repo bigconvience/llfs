@@ -17,7 +17,7 @@
 #include <vector>
 #include <map>
 
-#define DUMP_SCOPE 1
+#define DUMP_SCOPE 0
 
 static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
@@ -662,6 +662,7 @@ static llvm::Value *gen_rvalue(Node *node, Obj *var) {
     V = gen_get_ptr(node, Addr, getOffset(0));
     break;
   case TY_STRUCT:
+  case TY_VLA:
     V = Addr;
     break;
   default:
@@ -947,7 +948,8 @@ static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to) {
   std::string toTypeStr = ctypeKindString(toKind);
   output << buildSeperator(stmt_level, "cast: ")
         << "fromType: " << fromTypeStr << " toType: " << toTypeStr << std::endl;
-  if (toKind == TY_VOID) {
+  if (toKind == TY_VOID
+      || (fromKind == TY_VLA && toKind == TY_PTR)) {
     return Base;
   }
   bool sameTypeKind = fromKind == toKind 
@@ -999,7 +1001,7 @@ static llvm::Value *CreateConstArrayGEP(Node *node, llvm::Value *baseAddr, uint6
 }
 
 static llvm::Value *gen_cast(Node *node) {
-  int cur_level = ++stmt_level;
+  int cur_level = stmt_level;
   Node *origin = node->lhs;
   Type *fromType = origin->ty;
   std::string fromTypeStr = ctypeKindString(fromType->kind);
@@ -1019,7 +1021,6 @@ static llvm::Value *gen_cast(Node *node) {
   llvm::Value *V = nullptr;
   V = gen_expr(node->lhs);
   V = cast(V, fromType, toType);
-  --stmt_level;
   output << buildSeperator(cur_level, "gen_cast end") << std::endl;
   return V;
 }
@@ -1073,7 +1074,10 @@ static llvm::Value *gen_get_ptr(Node *node, llvm::Value *baseAddr, llvm::Value *
 static llvm::Value *gen_add_2(Node *node,
     llvm::Value *operandL, llvm::Value *operandR) {
   llvm::Value *V = nullptr;
-  if (node->o_kind == PTR_NUM) {
+  output << buildSeperator(stmt_level, "gen_add_2 o_kind:")
+       << node->o_kind << std::endl; 
+  
+  if (node->o_kind == PTR_NUM || node->o_kind == VLA_NUM) {
     // ptr + num -> GEP(ptr, num)
     // arr + num -> GEP(arr, 0, num)
     V = gen_get_ptr(node->lhs, operandL, operandR);
