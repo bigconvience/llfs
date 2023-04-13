@@ -2524,7 +2524,7 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
 
   // VLA + num
   if (lhs->ty->base->kind == TY_VLA) {
-    rhs = new_binary(ND_MUL, rhs, new_var_node(lhs->ty->base->vla_size, tok), tok);
+    rhs = new_binary(ND_MUL, rhs, lhs->ty->base->vla_len, tok);
     node = new_binary(ND_ADD, lhs, rhs, tok);
     rhs->is_offset = true;
     add_o_kind(node);

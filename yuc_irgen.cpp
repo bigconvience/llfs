@@ -613,8 +613,10 @@ static void dump_member(Member *member) {
 static void dump_ctype(Type *ctype) {
   Token *tag = ctype->tag;
   llvm::StringRef suffix = get_tag_type_name(tag).c_str();
+  std::string typeStr = ctypeKindString(ctype->kind);
   output << buildSeperator(stmt_level, "dump_ctype, size: ") 
       << ctype->size
+      << " kind: " << typeStr
       << " has_bitfield: " << ctype->has_bitfield 
       << " is_typedef:" << ctype->is_typedef
       << " tag: " << suffix.data()
@@ -701,16 +703,31 @@ static llvm::Value *gen_subscript(Node *node) {
   return load(node->ty, Addr); 
 }
 
+static Type *get_vla_base_ty(Type *ty) {
+  Type *cur = ty;
+  while(cur->kind == TY_VLA) {
+    cur = cur->base;
+  }
+  return  cur;
+}
+
 static llvm::Value *gen_decl_vla(Node *node) {
   Obj *vla_var = node->lhs->var;
   // load vla length
-  llvm::Value *vla_len = gen_expr(vla_var->ty->vla_len);
-  vla_len = Builder->CreateZExt(vla_len, Builder->getInt64Ty());
-  
+  Type *ty = vla_var->ty;
+
   // generate vla ptr
   llvm::Value *L = gen_expr(node->lhs);
+  // get vla length for base type
+  llvm::Value *vla_size = find_var(ty->vla_size);
+  vla_size = load(ty_long, vla_size);
+  // get element size
+  Type *vla_base_ty = get_vla_base_ty(ty);
+  llvm::Value *element_size = llvm::ConstantInt::get(Builder->getInt64Ty(), vla_base_ty->size);
+  llvm::Value *vla_len = Builder->CreateSDiv(vla_size, element_size);
+
   // alloca vla
-  llvm::Type *Ty = yuc2LLVMType(vla_var->ty);
+  llvm::Type *Ty = yuc2LLVMType(vla_base_ty);
   llvm::AllocaInst *localAddr = Builder->CreateAlloca(Ty, vla_len);
   localAddr->setAlignment(llvm::Align(16));
   push_var(vla_var, localAddr);
