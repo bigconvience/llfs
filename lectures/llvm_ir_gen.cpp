@@ -306,7 +306,6 @@ static llvm::Value* emit_load(Type *ty, llvm::Value *addr) {
   return V;
 }
 
-
 //
 //= emit statement and expression llvm ir
 //
@@ -328,8 +327,10 @@ static llvm::Value *gen_shl(Node *node);
 static llvm::Value *gen_shr(Node *node);
 static llvm::Value *gen_cast(Node *node);
 static llvm::Value *gen_var_value(Node *node);
+static llvm::Value *gen_relational(Node *node);
 
 static llvm::Value *gen_null(Node *node);
+static llvm::Value *emit_cast(llvm::Value *V, Type *from, Type *to);
 
 static llvm::Value *(*gen_table[ND_DUMMY])(Node *node) = {
   [ND_NULL_EXPR] = gen_null,
@@ -350,7 +351,259 @@ static llvm::Value *(*gen_table[ND_DUMMY])(Node *node) = {
   [ND_BITNOT] = gen_bitnot,
   [ND_SHL] = gen_shl,
   [ND_SHR] = gen_shr,
+
+  // relational operation
+  [ND_LT] = gen_relational,
+  [ND_LE] = gen_relational,
+  [ND_GT] = gen_relational,
+  [ND_GE] = gen_relational,
+  [ND_EQ] = gen_relational,
+  [ND_NE] = gen_relational,
 };
+
+// cast tables
+enum { B8, I8, I16, I32, I64, U8, U16, U32, U64, F32, F64, F80, PTR };
+
+static int get_type_id(Type *ty) {
+  switch (ty->kind) {
+  case TY_BOOL:
+    return B8;
+  case TY_CHAR:
+    return ty->is_unsigned ? U8 : I8;
+  case TY_SHORT:
+    return ty->is_unsigned ? U16 : I16;
+  case TY_INT:
+    return ty->is_unsigned ? U32 : I32;
+  case TY_LONG:
+    return ty->is_unsigned ? U64 : I64;
+  case TY_FLOAT:
+    return F32;
+  case TY_DOUBLE:
+    return F64;
+  case TY_LDOUBLE:
+    return F80;
+  case TY_PTR:
+    return PTR;
+  }
+  return I64;
+}
+
+// 求8的倍数
+int align_to_eight(int n) {
+  return ((n - 1) / 8 + 1);
+}
+
+static llvm::Type *get_int_n_ty(int size) {
+  return Builder->getIntNTy(size * 8);
+}
+
+static bool is_bool_value(llvm::Value *V) {
+  return V->getType() == Builder->getInt1Ty();
+}
+
+// ptr to i8* 
+static llvm::Value *uniform_address(llvm::Value *V) {
+  llvm::Type * type = llvm::PointerType::get(Builder->getInt8Ty(), 0);
+  return Builder->CreateBitCast(V, type);
+}
+
+// float to bool
+static llvm::Value *fpToBool(llvm::Value *V) {
+  llvm::Value *operand;
+  llvm::Value *Zero = llvm::Constant::getNullValue(V->getType());
+  llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::FCMP_UNE;
+  operand = Builder->CreateCmp(predicate, V, Zero);
+  return operand;
+}
+
+// gen bool for float or int
+static llvm::Value *gen_to_bool(Node *node) {
+  llvm::Value *condV = gen_expr(node);
+
+  if (is_flonum(node->ty)) {
+    condV = fpToBool(condV);
+  } else if (!is_bool_value(condV)) {
+    condV = Builder->CreateIsNotNull(condV);
+  }
+  return condV;
+}
+
+// The table for type casts
+static llvm::Value *i64i8(llvm::Value *V, Type *to_type) 
+{
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateTrunc(V, targetTy);
+};
+
+static llvm::Value *i8i64(llvm::Value *V, Type *to_type) 
+{
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateSExt(V, targetTy);
+};
+
+static llvm::Value *u8i64(llvm::Value *V, Type *to_type) 
+{
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateZExt(V, targetTy);
+};
+
+// signed int to double long
+static llvm::Value *i8f80(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateSIToFP(V, targetTy);
+};
+
+// unsigned int to double long
+static llvm::Value *u8f80(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateUIToFP(V, targetTy);
+};
+
+// double long to signed int
+static llvm::Value *f80i8(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateFPToSI(V, targetTy);
+};
+
+// double long to unsigned int
+static llvm::Value *f80u8(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateFPToUI(V, targetTy);
+};
+
+static llvm::Value *ptrptr(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateBitCast(V, targetTy);
+}
+
+static llvm::Value *ptrint(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreatePtrToInt(V, targetTy);
+}
+
+static llvm::Value *intptr(llvm::Value *V, Type *to_type) {
+  if (V->getType()->getIntegerBitWidth() < 64) {
+    V = Builder->CreateZExt(V, Builder->getInt64Ty());
+  }
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateIntToPtr(V, targetTy);
+}
+
+// float to BOOL
+static llvm::Value *f64b8(llvm::Value *V, Type *to_type) {
+  llvm::Value *cmp = fpToBool(V);
+  return Builder->CreateZExt(cmp, Builder->getInt8Ty());
+}
+
+// int to BOOL
+static llvm::Value *i64b8(llvm::Value *V, Type *to_type) {
+  llvm::Value *Zero = llvm::Constant::getNullValue(V->getType());
+  llvm::CmpInst::Predicate predicate = llvm::CmpInst::Predicate::ICMP_NE;
+  llvm::Value *cmp = Builder->CreateCmp(predicate, V, Zero);
+  return Builder->CreateZExt(cmp, Builder->getInt8Ty());
+}
+
+// BOOL to float
+static llvm::Value *b8f64(llvm::Value *V, Type *to_type) {
+  return V;
+}
+
+// BOOL to int
+static llvm::Value *b8i64(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateZExt(V, targetTy);
+}
+
+static llvm::Value *fpext(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateFPExt(V, targetTy);
+}
+
+static llvm::Value *fptrunc(llvm::Value *V, Type *to_type) {
+  llvm::Type *targetTy = create_type(to_type);
+  return Builder->CreateFPExt(V, targetTy);
+}
+
+static llvm::Value *(*cast_table[][13])(llvm::Value *, Type *) = {
+  // b8    i8   i16     i32   i64     u8   u16     u32    u64,   f32    f64   f80    ptr
+  {u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, u8i64, i8f80, i8f80, i8f80, intptr}, // b8
+
+  {i64b8, NULL, i8i64, i8i64, i8i64, NULL, i8i64, i8i64, i8i64, i8f80, i8f80, i8f80, intptr}, // i8
+  {i64b8, i64i8, NULL,  i8i64, i8i64, NULL, NULL, i8i64, i8i64, i8f80, i8f80, i8f80, intptr}, // i16
+  {i64b8, i64i8, i64i8, NULL,  i8i64, i64i8, i64i8, i64i8, i8i64, i8f80, i8f80, i8f80, intptr}, // i32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, i8f80, i8f80, i8f80, intptr}, // i64
+
+  {i64b8, NULL, u8i64, u8i64, u8i64, NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u8
+  {i64b8, i64i8, NULL,  u8i64, u8i64, NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u16
+  {i64b8, i64i8, i64i8, NULL,  u8i64, NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u32
+  {i64b8, i64i8, i64i8, i64i8, NULL,  NULL, NULL, NULL, NULL, u8f80, u8f80, u8f80, intptr}, // u64
+
+  {f64b8, f80i8, f80i8, f80i8, f80i8, f80u8, f80u8, f80u8, f80u8, NULL,  fpext, fpext, NULL}, // f32
+  {f64b8, f80i8, f80i8, f80i8, f80i8, f80u8, f80u8, f80u8, f80u8, fptrunc,  NULL, fpext, NULL}, // f64
+  {f80i8, f80i8, f80i8, f80i8, f80i8, f80u8, f80u8, f80u8, f80u8, fptrunc,  fptrunc, NULL, NULL}, // f80
+
+  {NULL,  ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, ptrint, NULL, NULL, NULL, ptrptr}, // ptr
+};
+
+// relation operation tables
+enum { LT, LE, GT, GE, EQ, NE };
+enum { UNSIGNED, SIGNED};
+enum { Int, Float };
+
+static int get_relation_id(Node *node) {
+  switch(node->kind) {
+  case ND_LT:
+    return LT;
+  case ND_LE:
+    return LE;
+  case ND_GT:
+    return GT;
+  case ND_GE:
+    return GE;
+  case ND_EQ:
+    return EQ;
+  case ND_NE:
+    return NE;
+  }
+  return LT;
+}
+
+static int get_type_category(Type *ty) {
+  return is_flonum(ty) ? Float : Int;
+}
+
+static int get_sign_id(Type *ty) {
+  return ty->is_unsigned ? UNSIGNED : SIGNED;
+}
+
+// operation Predicate Table [Relation][Signed][Integer]
+static llvm::CmpInst::Predicate predicate_table[][2][2] = {
+  {
+    {llvm::CmpInst::Predicate::ICMP_ULT, llvm::CmpInst::Predicate::FCMP_OLT}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SLT, llvm::CmpInst::Predicate::FCMP_OLT}, // Signed
+  }, // LT
+  {
+    {llvm::CmpInst::Predicate::ICMP_ULE, llvm::CmpInst::Predicate::FCMP_OLE}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SLE, llvm::CmpInst::Predicate::FCMP_OLE}, // Signed
+  }, // LE
+  {
+    {llvm::CmpInst::Predicate::ICMP_UGT, llvm::CmpInst::Predicate::FCMP_OGT}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SGT, llvm::CmpInst::Predicate::FCMP_OGT}, // Signed
+  }, // GT
+  {
+    {llvm::CmpInst::Predicate::ICMP_UGE, llvm::CmpInst::Predicate::FCMP_OGE}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_SGE, llvm::CmpInst::Predicate::FCMP_OGE}, // Signed
+  }, // GE
+  {
+    {llvm::CmpInst::Predicate::ICMP_EQ, llvm::CmpInst::Predicate::FCMP_OEQ}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_EQ, llvm::CmpInst::Predicate::FCMP_OEQ}, // Signed
+  }, // EQ
+  {
+    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_UNE}, // Unsigned
+    {llvm::CmpInst::Predicate::ICMP_NE, llvm::CmpInst::Predicate::FCMP_UNE}, // Signed
+  }, // NE
+};
+
 
 // emit num + num
 static llvm::Value *gen_math_add(Type *result_ty, llvm::Value *L, llvm::Value *R) {
@@ -499,6 +752,26 @@ static llvm::Value *gen_shr(Node *node) {
 }
 
 
+// get predicate
+static llvm::CmpInst::Predicate get_predicate(Node *node, Type *nodeType) {
+  int relationId = get_relation_id(node);
+  int signId = get_sign_id(nodeType);
+  int catagory = get_type_category(nodeType);
+  return predicate_table[relationId][signId][catagory];
+}
+
+// emit relational ir
+static llvm::Value *gen_relational(Node *node) {
+  llvm::Value *L = gen_expr(node->lhs);
+  llvm::Value *R = gen_expr(node->rhs);
+  llvm::CmpInst::Predicate predicate = get_predicate(node, node->lhs->ty);
+  llvm::Value *V = Builder->CreateCmp(predicate, L, R);
+  if (node->eval_as_bool) {
+    return V;
+  }
+  return emit_cast(V, ty_bool, ty_int);
+}
+
 // declaration or statement
 static void gen_block_item(Node *node) {
   Node *stmt = node->body;
@@ -517,6 +790,11 @@ static void gen_block(Node *node) {
 
 // emit cast value by type
 static llvm::Value *emit_cast(llvm::Value *V, Type *from, Type *to) {
+  int t1 = get_type_id(from);
+  int t2 = get_type_id(to);
+  if (cast_table[t1][t2]) {
+    return cast_table[t1][t2](V, to);
+  }
   return V;
 }
 

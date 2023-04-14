@@ -1,20 +1,26 @@
-int sum(int a) {
+void s_relation() {
+	int a;
 	int b;
+
+	a < b;
+	a <= b;
+
+	a > b;
+	a >= b;
+
+	a == b;
+	a != b;
+}
+
+void u_relation() {
 	unsigned int c;
 	unsigned int d;
-	a & b;
-	a | b;
-	a ^ b;
-	~a;
+	c < d;
+	c <= d;
 
-	c & d;
-	c | d;
-	c ^ d;
-	~c;
+	c > d;
+	c >= d;
 
-	a << b;
-    c << b;
-    a >> b;
-    c >> b;
-	return -1024;
+	c == d;
+	c != d;
 }

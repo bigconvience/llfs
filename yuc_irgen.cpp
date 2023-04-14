@@ -53,6 +53,7 @@ static void gen_label(Node *node);
 static llvm::Value* cast(llvm::Value *Base, Type *from, Type *to);
 static void gen_branch(llvm::BasicBlock *target);
 static void gen_basicblock(llvm::BasicBlock *target);
+static llvm::Value *gen_asm(Node *node);
 
 static std::map<Obj *, llvm::Value*> scopeVars;
 static std::map<Obj *, llvm::Constant*> globalVars;
@@ -2005,6 +2006,13 @@ static void gen_return(Node *node) {
   }
 }
 
+static llvm::Value *gen_asm(Node *node) {
+  // Assemble the final asm string.
+  std::string AsmString = node->asm_str;
+  bool HasSideEffect = true;
+  return nullptr;
+}
+
 static void gen_block_item(Node *node) {
   bool is_goto = false;
   for (Node *n = node->body; n; n = n->next) {
@@ -2108,6 +2116,9 @@ static void gen_stmt(Node *node) {
       break;
     case ND_RETURN:
       gen_return(node);
+      break;
+    case ND_ASM:
+      gen_asm(node);
       break;
     default:
       output << buildSeperator(level+1, kindStr) << std::endl;
