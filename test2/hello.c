@@ -1,16 +1,12 @@
 #include "test.h"
 
+extern int ext1;
+// extern int *ext2;
 
 int main() {
-
+  ASSERT(5, ext1);
+  // ASSERT(5, *ext2);
   printf("OK\n");
 
   return 0;
-}
-
-char *asm_fn1(void) {
-  asm("mov $50, %rax\n\t"
-      "mov %rbp, %rsp\n\t"
-      "pop %rbp\n\t"
-      "ret");
 }

@@ -2825,7 +2825,7 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
 		return nullptr;
 	}
 
-  output << "createGlobalVar name:" << name << std::endl;
+  output << "createGlobalVar: " << name << std::endl;
   llvm::Type *DesiredType = get_init_type(ctype);
   TheModule->getOrInsertGlobal(name, DesiredType);
   llvm::GlobalVariable *gVar = TheModule->getNamedGlobal(name);
@@ -2833,10 +2833,11 @@ static llvm::GlobalVariable *createGlobalVar(Obj *yucNode) {
   if (!yucNode->is_static) {
   	gVar->setDSOLocal(true);
   }
-
-  llvm::Constant *initializer = create_initializer(DesiredType, yucNode);
-  putGlobalVar(yucNode, initializer);
-  gVar->setInitializer(initializer);
+  if (yucNode->is_definition) {
+    llvm::Constant *initializer = create_initializer(DesiredType, yucNode);
+    putGlobalVar(yucNode, initializer);
+    gVar->setInitializer(initializer);
+  }
   gVar->setLinkage(yuc2LinkageType(yucNode));
   return gVar;
 }
