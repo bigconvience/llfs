@@ -1417,8 +1417,11 @@ static llvm::Value *emit_assign_struct(Node *node) {
     addrR = gen_addr(node->rhs);
   }
   operandR = uniform_address(addrR);
-  
-  llvm::Value *dest = emit_memcpy(operandL, operandR, node->ty);
+  if (auto *constL = dyn_cast<llvm::Constant>(operandR)) {
+    if (!constL->isNullValue()) {
+      llvm::Value *dest = emit_memcpy(operandL, operandR, node->ty);
+    }
+  }
   return addrR;
 }
 
@@ -2247,7 +2250,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
     return type;
   }
   // struct
-  bool packed = false;
+  bool packed = ctype->is_packed;
 
   int index = 0;
   member = ctype->members;

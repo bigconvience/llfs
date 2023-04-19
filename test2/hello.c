@@ -1,22 +1,17 @@
 #include "test.h"
 
-char *asm_fn1(void) {
-  asm("mov $50, %rax\n\t"
-      "mov %rbp, %rsp\n\t"
-      "pop %rbp\n\t"
-      "ret");
-}
-
-// char *asm_fn2(void) {
-//   asm inline volatile("mov $55, %rax\n\t"
-//                       "mov %rbp, %rsp\n\t"
-//                       "pop %rbp\n\t"
-//                       "ret");
-// }
+typedef struct {
+  int a;
+  char b;
+  int c;
+  double d;
+} T;
 
 int main() {
-  ASSERT(50, asm_fn1());
-  // ASSERT(55, asm_fn2());
+  ASSERT(0, offsetof(T, a));
+  ASSERT(4, offsetof(T, b));
+  ASSERT(8, offsetof(T, c));
+  ASSERT(16, offsetof(T, d));
 
   printf("OK\n");
   return 0;
