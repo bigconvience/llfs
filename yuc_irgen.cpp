@@ -10,6 +10,7 @@
 #include "llvm/ADT/StringRef.h"
 #include "llvm/IR/Instruction.h"
 #include "llvm/ADT/ArrayRef.h"
+#include "llvm/IR/InlineAsm.h"
 
 #include <algorithm>
 #include <fstream>
@@ -2006,10 +2007,40 @@ static void gen_return(Node *node) {
   }
 }
 
+void findAndReplaceAll(std::string & data, std::string toSearch, std::string replaceStr)
+{
+    // Get the first occurrence
+    size_t pos = data.find(toSearch);
+    // Repeat till end is reached
+    while( pos != std::string::npos)
+    {
+        // Replace this occurrence of Sub String
+        data.replace(pos, toSearch.size(), replaceStr);
+        // Get the next occurrence from the current position
+        pos =data.find(toSearch, pos + replaceStr.size());
+    }
+}
+
 static llvm::Value *gen_asm(Node *node) {
   // Assemble the final asm string.
   std::string AsmString = node->asm_str;
+  findAndReplaceAll(AsmString, "$", "$$");
+
+  std::string Constraints = "~{dirflag},~{fpsr},~{flags}";
+  bool HasUnwindClobber = false;
+  std::vector<llvm::Type *> ArgTypes;
+  llvm::Type *ResultType = Builder->getVoidTy();
+  llvm::FunctionType *FTy =
+    llvm::FunctionType::get(ResultType, ArgTypes, false);
   bool HasSideEffect = true;
+  llvm::InlineAsm::AsmDialect AsmDialect = llvm::InlineAsm::AD_ATT;
+  llvm::InlineAsm *IA = llvm::InlineAsm::get(
+      FTy, AsmString, Constraints, HasSideEffect,
+      /* IsAlignStack */ false, AsmDialect, HasUnwindClobber);
+
+  std::vector<llvm::Value*> RegResults;
+  llvm::Value *V = Builder->CreateCall(IA, RegResults);
+
   return nullptr;
 }
 
