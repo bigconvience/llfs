@@ -2032,7 +2032,6 @@ static int64_t eval2(Node *node, char ***label) {
     if (node->var->ty->kind != TY_ARRAY && node->var->ty->kind != TY_FUNC)
       error_tok(node->tok, "invalid initializer");
     *label = &node->var->name;
-    std::cout << "ND_VAR label:" << **label << std::endl;
     return 0;
   case ND_NUM:
     return node->val;
