@@ -475,6 +475,7 @@ bool is_flonum(Type *ty);
 bool is_numeric(Type *ty);
 bool is_compatible(Type *t1, Type *t2);
 bool is_struct(Type *ty);
+bool is_record_type(Type *ty);
 bool is_compound_type(Type *ty);
 Type *copy_type(Type *ty);
 Type *pointer_to(Type *base);

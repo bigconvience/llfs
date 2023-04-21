@@ -70,6 +70,14 @@ bool is_struct(Type *ty) {
   return ty->kind == TY_STRUCT;
 }
 
+bool is_record_type(Type *ty) {
+  if (!ty) {
+    return false;
+  }
+  return ty->kind == TY_STRUCT || 
+         ty->kind == TY_UNION;
+}
+
 bool is_compound_type(Type *ty) {
   if (!ty) {
     return false;

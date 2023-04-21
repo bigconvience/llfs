@@ -2251,6 +2251,7 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
   }
   // struct
   bool packed = ctype->is_packed;
+  type = create_struct_type(ctype);
 
   int index = 0;
   member = ctype->members;
@@ -2306,7 +2307,6 @@ static llvm::StructType *yuc2StructType(Type *ctype) {
       member = member->next;
     }
   }
-  type = create_struct_type(ctype);
   type->setBody(Types, packed);
   if (ctype->has_bitfield) {
     create_packed_struct_type(type, ctype);
@@ -2345,7 +2345,7 @@ static llvm::StructType *ConvertRecordDeclType(Type *ctype) {
 }
 
 static llvm::Type *yuc2LLVMType(Type *ctype) {
-  //output << "yuc2LLVMType: " << ctypeKindString(ctype->kind)  << std::endl;
+  // output << "yuc2LLVMType: " << ctypeKindString(ctype->kind)  << std::endl;
   llvm::Type *type;
   switch (ctype->kind) {
     case TY_BOOL:

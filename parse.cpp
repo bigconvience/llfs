@@ -313,6 +313,11 @@ static Obj *new_gvar(char *name, Type *ty) {
   return var;
 }
 
+static char *new_initializer_name(void) {
+  static int id = 0;
+  return format(".init..%d", id++);
+}
+
 static char *new_unique_name(void) {
   static int id = 0;
   return format(".L..%d", id++);
@@ -1465,9 +1470,9 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   lhs->var = var;
   lhs->var->init = init;
   Node *rhs = nullptr;
-  bool is_compound = is_compound_type(var->ty);
+  bool is_record = is_record_type(var->ty);
   bool is_const_init = is_const_initializer(init);
-  if (is_compound && is_const_initializer) {
+  if (is_record && is_const_initializer) {
     rhs = new_node(ND_NULL_EXPR, tok);
     write_lvar_data(init, var);
   } else {
@@ -2041,13 +2046,11 @@ static int64_t eval2(Node *node, char ***label) {
 }
 
 static int64_t eval_rval(Node *node, char ***label) {
-  std::cout << "eval_rval: " << node->kind;
   switch (node->kind) {
   case ND_VAR:
     if (node->var->is_local)
       error_tok(node->tok, "not a compile-time constant");
     *label = &node->var->name;
-    std::cout << " ND_VAR:" << **label << std::endl;
     return 0;
   case ND_DEREF:
     std::cout << " ND_DEREF" << std::endl;
@@ -3048,7 +3051,7 @@ static Node *postfix(Token **rest, Token *tok) {
       return new_var_node(var, start);
     }
 
-    Obj *var = new_lvar("", ty);
+    Obj *var = new_lvar(new_initializer_name(), ty);
     Node *lhs = lvar_initializer(rest, tok, var);
     Node *rhs = new_var_node(var, tok);
     return new_binary(ND_COMMA, lhs, rhs, start);
