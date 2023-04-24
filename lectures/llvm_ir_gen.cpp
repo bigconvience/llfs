@@ -191,10 +191,27 @@ static llvm::Type *get_double_type(Type *ty) {
   return Builder->getDoubleTy();
 }
 
+static llvm::Type *get_long_double_type(Type *ty) {
+  return llvm::Type::getX86_FP80Ty(getLLVMContext());
+}
+
 static llvm::Type *get_array_type(Type *ctype) {
   llvm::Type *base = create_type(ctype->base);
   int array_len = ctype->array_len;
   llvm::ArrayType *type = llvm::ArrayType::get(base, array_len);
+  return type;
+}
+
+static llvm::Type *get_pointer_type(Type *ctype) {
+  Type *baseTy = ctype->base;
+  llvm::Type *base = nullptr;
+  if (baseTy->kind == TY_VOID) {
+    // (void *) to (char *)
+    base = Builder->getInt8Ty();
+  } else {
+    base = create_type(baseTy);
+  }
+  llvm::Type *type = llvm::PointerType::get(base, 0);
   return type;
 }
 
@@ -207,7 +224,9 @@ static llvm::Type *(*type_table[TY_DUMMY])(Type *ctype) = {
   [TY_LONG] = get_long_type,
   [TY_FLOAT] = get_float_type,
   [TY_DOUBLE] = get_double_type,
+  [TY_LDOUBLE] = get_long_double_type,
   [TY_ARRAY] = get_array_type,
+  [TY_PTR] = get_pointer_type,
 };
 
 static llvm::Type *create_type(Type *ty) {
@@ -351,7 +370,7 @@ static llvm::Value *gen_cast(Node *node);
 static llvm::Value *gen_var_value(Node *node);
 static llvm::Value *gen_relational(Node *node);
 static llvm::Value *gen_comma(Node *node);
-
+static llvm::Value *gen_assign(Node *node);
 static llvm::Value *gen_null(Node *node);
 static llvm::Value *emit_cast(llvm::Value *V, Type *from, Type *to);
 
@@ -384,6 +403,7 @@ static llvm::Value *(*gen_table[ND_DUMMY])(Node *node) = {
   [ND_NE] = gen_relational,
 
   [ND_COMMA] = gen_comma,
+  [ND_ASSIGN] = gen_assign,
 };
 
 // cast tables
@@ -801,6 +821,12 @@ static llvm::Value *gen_relational(Node *node) {
 static llvm::Value *gen_comma(Node *node) {
   gen_expr(node->lhs);
   llvm::Value *V = gen_expr(node->rhs);
+  return V;
+}
+
+// emit assing
+static llvm::Value *gen_assign(Node *node) {
+  llvm::Value *V = nullptr;
   return V;
 }
 
