@@ -161,35 +161,48 @@ static bool is_builtin_name(std::string &name) {
       || name == "__va_area__";
 }
 
+static llvm::Type *get_void_type(Type *ty) {
+  return Builder->getVoidTy();
+}
+
+static llvm::Type *get_char_type(Type *ty) {
+  return Builder->getInt8Ty();
+}
+
+static llvm::Type *get_short_type(Type *ty) {
+  return Builder->getInt16Ty();
+}
+
+static llvm::Type *get_int_type(Type *ty) {
+  return Builder->getInt32Ty();
+}
+
+static llvm::Type *get_long_type(Type *ty) {
+  return Builder->getInt64Ty();
+}
+
+static llvm::Type *get_float_type(Type *ty) {
+  return Builder->getFloatTy();
+}
+
+static llvm::Type *get_double_type(Type *ty) {
+  return Builder->getDoubleTy();
+}
+
+
+static llvm::Type *(*type_table[TY_DUMMY])(Type *type) = {
+  [TY_VOID] = get_void_type,
+  [TY_BOOL] = get_char_type,
+  [TY_CHAR] = get_char_type,
+  [TY_SHORT] = get_short_type,
+  [TY_INT] = get_int_type,
+  [TY_LONG] = get_long_type,
+  [TY_FLOAT] = get_float_type,
+  [TY_DOUBLE] = get_double_type,
+};
+
 static llvm::Type *create_type(Type *ty) {
-  llvm::Type *type;
-  switch(ty->kind) {
-  case TY_BOOL:
-    type = Builder->getInt8Ty();
-    break;
-  case TY_CHAR:
-    type = Builder->getInt8Ty();
-    break;
-  case TY_SHORT:
-    type = Builder->getInt16Ty();
-    break;
-  case TY_INT:
-    type = Builder->getInt32Ty();
-    break;
-  case TY_LONG:
-    type = Builder->getInt64Ty();
-    break;
-  case TY_FLOAT:
-    type = Builder->getFloatTy();
-    break;
-  case TY_DOUBLE:
-    type = Builder->getDoubleTy();
-    break;
-  default:
-    type = Builder->getInt32Ty();
-    break;
-  }
-  return type;
+  return type_table[ty->kind](ty);
 }
 
 static llvm::Constant *build_float(llvm::Type *type, Type *ctype, char *buf, int offset, Relocation *rel) {
