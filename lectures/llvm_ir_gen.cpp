@@ -161,6 +161,8 @@ static bool is_builtin_name(std::string &name) {
       || name == "__va_area__";
 }
 
+static llvm::Type *create_type(Type *ty);
+
 static llvm::Type *get_void_type(Type *ty) {
   return Builder->getVoidTy();
 }
@@ -189,8 +191,14 @@ static llvm::Type *get_double_type(Type *ty) {
   return Builder->getDoubleTy();
 }
 
+static llvm::Type *get_array_type(Type *ctype) {
+  llvm::Type *base = create_type(ctype->base);
+  int array_len = ctype->array_len;
+  llvm::ArrayType *type = llvm::ArrayType::get(base, array_len);
+  return type;
+}
 
-static llvm::Type *(*type_table[TY_DUMMY])(Type *type) = {
+static llvm::Type *(*type_table[TY_DUMMY])(Type *ctype) = {
   [TY_VOID] = get_void_type,
   [TY_BOOL] = get_char_type,
   [TY_CHAR] = get_char_type,
@@ -199,6 +207,7 @@ static llvm::Type *(*type_table[TY_DUMMY])(Type *type) = {
   [TY_LONG] = get_long_type,
   [TY_FLOAT] = get_float_type,
   [TY_DOUBLE] = get_double_type,
+  [TY_ARRAY] = get_array_type,
 };
 
 static llvm::Type *create_type(Type *ty) {
@@ -341,6 +350,7 @@ static llvm::Value *gen_shr(Node *node);
 static llvm::Value *gen_cast(Node *node);
 static llvm::Value *gen_var_value(Node *node);
 static llvm::Value *gen_relational(Node *node);
+static llvm::Value *gen_comma(Node *node);
 
 static llvm::Value *gen_null(Node *node);
 static llvm::Value *emit_cast(llvm::Value *V, Type *from, Type *to);
@@ -372,6 +382,8 @@ static llvm::Value *(*gen_table[ND_DUMMY])(Node *node) = {
   [ND_GE] = gen_relational,
   [ND_EQ] = gen_relational,
   [ND_NE] = gen_relational,
+
+  [ND_COMMA] = gen_comma,
 };
 
 // cast tables
@@ -783,6 +795,13 @@ static llvm::Value *gen_relational(Node *node) {
     return V;
   }
   return emit_cast(V, ty_bool, ty_int);
+}
+
+// emit comma
+static llvm::Value *gen_comma(Node *node) {
+  gen_expr(node->lhs);
+  llvm::Value *V = gen_expr(node->rhs);
+  return V;
 }
 
 // declaration or statement
