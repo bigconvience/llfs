@@ -243,6 +243,7 @@ typedef enum {
   ND_PREFIX_INC, // ++prefix
   ND_PREFIX_DEC, // --prefix
   ND_SUBSCRIPT, // postfix arr[idx]
+  ND_DECL_VLA, // declare a vla
   ND_DUMMY, // dummy
 } NodeKind;
 
@@ -391,8 +392,10 @@ struct Type {
 
   // Struct
   Member *members;
+  Member *grouped_members;
   bool is_flexible;
   bool is_packed;
+  bool has_bitfield;
 
   // Function type
   Type *return_ty;
@@ -417,11 +420,17 @@ struct Member {
   int idx;
   int align;
   int offset;
+  int type_idx; // index correspond
 
   // Bitfield
   bool is_bitfield;
   int bit_offset;
   int bit_width;
+  int lhs_bits; // left shift bits
+  int rhs_bits; // right shift bits
+  int real_type_size; // grouped type size
+
+  Member *grouped_member;
 };
 
 // This struct represents a variable initializer. Since initializers
@@ -468,6 +477,7 @@ bool is_flonum(Type *ty);
 bool is_numeric(Type *ty);
 bool is_compatible(Type *t1, Type *t2);
 bool is_struct(Type *ty);
+bool is_record_type(Type *ty);
 bool is_compound_type(Type *ty);
 Type *copy_type(Type *ty);
 Type *pointer_to(Type *base);
@@ -476,6 +486,7 @@ Type *array_of(Type *base, int size);
 Type *vla_of(Type *base, Node *expr);
 Type *enum_type(void);
 Type *struct_type(void);
+Type *get_int_type(int size);
 void add_type(Node *node);
 bool is_const_expr(Node *node);
 bool is_const_initializer(Initializer *init);
@@ -588,7 +599,7 @@ static std::string ctypeKindString(TypeKind kind) {
       kindStr = "union";
       break;
     default:
-      kindStr = "unknow type kind";
+      kindStr = std::to_string(kind);
       break;
     }
   return kindStr;
@@ -704,8 +715,10 @@ static std::string node_kind_info(NodeKind kind) {
       return "ND_PREFIX_DEC";
     case ND_SUBSCRIPT:
       return "ND_SUBSCRIPT";
+    case ND_DECL_VLA:
+      return "ND_DECL_VLA";
     default:
-      return "unkonw";
+      return std::to_string(kind);
   }
 }
 #endif

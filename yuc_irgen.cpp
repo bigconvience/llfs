@@ -19,6 +19,7 @@
 #include <map>
 
 #define DUMP_SCOPE 0
+#define DUMP_MEMBER 0
 
 static std::unique_ptr<llvm::LLVMContext> TheContext;
 static std::unique_ptr<llvm::Module> TheModule;
@@ -601,6 +602,9 @@ static std::string buildSeperator(int count, std::string target) {
 }
 
 static void dump_member(Member *member) {
+  if (!DUMP_MEMBER) {
+    return;
+  }
   output<< buildSeperator(stmt_level, "dump_member, idx: ")
         << member->idx  
         << " offset: " << member->offset
@@ -2693,6 +2697,7 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, Type *ctype, ch
     if (isAnnonVar(nameStr)) {
       const std::string &Str = annonInitData[nameStr];
       global = CGM().GetAddrOfConstantCString(Str, nullptr);
+      // create literal according to type
       output << " annonGlobalVar: " << global->isConstant() << std::endl;
     } else {
       global = TheModule->getGlobalVariable(name);
@@ -2704,7 +2709,7 @@ llvm::Constant *EmitPointerInitialization(llvm::PointerType *Ty, Type *ctype, ch
     IndexValues[0] = llvm::ConstantInt::get(Builder->getInt32Ty(), Indices[0]);
 
     TypeKind baseTypeKind = ctype->base->kind;
-    output << " base kind:" << ctypeKindString(baseTypeKind);
+    output << " base kind:" << ctypeKindString(baseTypeKind) << std::endl;
     if (addend == 0) {
       if (BaseValueTy->isIntegerTy ()) {
         return Base;
@@ -2843,10 +2848,11 @@ static void InitializeModule(const std::string &moduleName) {
   ModuleBuilder = std::make_unique<IRGenModule>(*TheModule);
 }
 
-void processAnnonVar(Obj *ast) {
+static void processAnnonVar(Obj *ast) {
 	if (ast) {
 		processAnnonVar(ast->next);
 		std::string name = ast->name;
+    output << "processAnnonVar: " << name << std::endl;
 		annonInitData[name] = ast->init_data;
 	}
 }

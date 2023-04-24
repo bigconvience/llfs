@@ -1,4 +1,4 @@
-#include "test.h"
+// #include "test.h"
 
 typedef struct Tree {
   int val;
@@ -6,18 +6,10 @@ typedef struct Tree {
   struct Tree *rhs;
 } Tree;
 
-Tree *tree = &(Tree){
-  1,
-  &(Tree){
-    2,
-    &(Tree){ 3, 0, 0 },
-    &(Tree){ 4, 0, 0 }
-  },
-  0
-};
+Tree *t1 = &(Tree){ 3, 0, 0 };
 
-int main() {
+// int main() {
 
-  printf("OK\n");
-  return 0;
-}
+//   printf("OK\n");
+//   return 0;
+// }

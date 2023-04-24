@@ -36,6 +36,21 @@ static Type *new_type(TypeKind kind, int size, int align) {
   return ty;
 }
 
+Type *get_int_type(int size) {
+  switch(size) {
+  case 1:
+    return ty_char;
+  case 2:
+    return ty_short;
+  case 4:
+    return ty_int;
+  case 8:
+    return ty_long;
+  default:
+    return ty_char;
+  }
+}
+
 bool is_integer(Type *ty) {
   TypeKind k = ty->kind;
   return k == TY_BOOL || k == TY_CHAR || k == TY_SHORT ||
@@ -53,6 +68,14 @@ bool is_numeric(Type *ty) {
 
 bool is_struct(Type *ty) {
   return ty->kind == TY_STRUCT;
+}
+
+bool is_record_type(Type *ty) {
+  if (!ty) {
+    return false;
+  }
+  return ty->kind == TY_STRUCT || 
+         ty->kind == TY_UNION;
 }
 
 bool is_compound_type(Type *ty) {

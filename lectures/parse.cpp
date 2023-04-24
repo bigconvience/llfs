@@ -139,6 +139,7 @@ static Token *function(Token *tok, Type *basety, VarAttr *attr);
 static Token *global_variable(Token *tok, Type *basety, VarAttr *attr);
 static void add_o_kind(Node *node);
 static Node *new_prefix(Node *node, Token *tok, int addend);
+static void write_lvar_data(Initializer *init, Obj *var);
 
 static int align_down(int n, int align) {
   return align_to(n - align + 1, align);
@@ -312,6 +313,11 @@ static Obj *new_gvar(char *name, Type *ty) {
   return var;
 }
 
+static char *new_initializer_name(void) {
+  static int id = 0;
+  return format(".init..%d", id++);
+}
+
 static char *new_unique_name(void) {
   static int id = 0;
   return format(".L..%d", id++);
@@ -330,6 +336,11 @@ static char *new_struct_shadow_name(void) {
 static char *new_tag_name(void) {
   static int id = 0;
   return format(".tag..%d", id++);
+}
+
+static char *new_vla_size_name(void) {
+  static int id = 0;
+  return format(".vla_size..%d", id++);
 }
 
 static Token *new_token_tag() {
@@ -355,6 +366,30 @@ static char *get_ident(Token *tok) {
   if (tok->kind != TK_IDENT)
     error_tok(tok, "expected an identifier");
   return strndup(tok->loc, tok->len);
+}
+
+static std::string get_scope_name(std::string var_name) {
+  var_name.append("..");
+  var_name.append(std::to_string(scope_level));
+  return var_name;
+}
+
+static char* get_vla_size_name(Token *tok) {
+  std::string var_name = get_ident(tok);
+  var_name.append(".vla.size");
+
+  char *cstr = new char[var_name.length() + 1];
+  std::strcpy(cstr, var_name.c_str());
+  return cstr;
+}
+
+static char* get_vla_stack_name(Token *tok) {
+  std::string var_name = get_ident(tok);
+  var_name.append(".vla.stack");
+
+  char *cstr = new char[var_name.length() + 1];
+  std::strcpy(cstr, var_name.c_str());
+  return cstr;
 }
 
 static Type *find_typedef(Token *tok) {
@@ -491,6 +526,10 @@ static Type *declspec(Token **rest, Token *tok, VarAttr *attr) {
         ty = typeof_specifier(&tok, tok->next);
       } else {
         ty = ty2;
+        if (ty2) {
+          // use typedef name as tag
+          ty->tag = ty2->name;
+        }
         tok = tok->next;
       }
 
@@ -850,7 +889,13 @@ static Node *compute_vla_size(Type *ty, Token *tok) {
   else
     base_sz = new_num(ty->base->size, tok);
 
-  ty->vla_size = new_lvar("", ty_ulong);
+  if (ty->name) {
+    new_lvar(get_vla_stack_name(ty->name), pointer_to(ty_char));
+  }
+  // ty->vla_size = new_lvar("", ty_ulong);
+  ty->vla_size = new_lvar(new_vla_size_name(), ty_ulong);
+
+  // return node;
   Node *expr = new_binary(ND_ASSIGN, new_var_node(ty->vla_size, tok),
                           new_binary(ND_MUL, ty->vla_len, base_sz, tok),
                           tok);
@@ -920,8 +965,7 @@ static Node *declaration(Token **rest, Token *tok, Type *basety, VarAttr *attr) 
       // x = alloca(tmp)`.
       Obj *var = new_lvar(get_ident(ty->name), ty);
       Token *tok = ty->name;
-      Node *expr = new_binary(ND_ASSIGN, new_vla_ptr(var, tok),
-                              new_alloca(new_var_node(ty->vla_size, tok)),
+      Node *expr = new_unary(ND_DECL_VLA, new_vla_ptr(var, tok),
                               tok);
 
       cur = cur->next = new_unary(ND_EXPR_STMT, expr, tok);
@@ -1426,8 +1470,11 @@ static Node *lvar_initializer(Token **rest, Token *tok, Obj *var) {
   lhs->var = var;
   lhs->var->init = init;
   Node *rhs = nullptr;
-  if (is_compound_type(var->ty) && is_const_initializer(init)) {
+  bool is_record = is_record_type(var->ty);
+  bool is_const_init = is_const_initializer(init);
+  if (is_record && is_const_initializer) {
     rhs = new_node(ND_NULL_EXPR, tok);
+    write_lvar_data(init, var);
   } else {
     rhs = create_lvar_init(init, var->ty, &desg, tok);
   }
@@ -1524,6 +1571,14 @@ write_gvar_data(Relocation *cur, Initializer *init, Type *ty, char *buf, int off
   rel->addend = val;
   cur->next = rel;
   return cur->next;
+}
+
+static void write_lvar_data(Initializer *init, Obj *var) {
+    Relocation head = {};
+    char *buf = (char *)calloc(1, var->ty->size);
+    write_gvar_data(&head, init, var->ty, buf, 0);
+    var->init_data = buf;
+    var->rel = head.next;
 }
 
 // Initializers for global variables are evaluated at compile-time and
@@ -1982,7 +2037,6 @@ static int64_t eval2(Node *node, char ***label) {
     if (node->var->ty->kind != TY_ARRAY && node->var->ty->kind != TY_FUNC)
       error_tok(node->tok, "invalid initializer");
     *label = &node->var->name;
-    std::cout << "ND_VAR label:" << **label << std::endl;
     return 0;
   case ND_NUM:
     return node->val;
@@ -1992,13 +2046,11 @@ static int64_t eval2(Node *node, char ***label) {
 }
 
 static int64_t eval_rval(Node *node, char ***label) {
-  std::cout << "eval_rval: " << node->kind;
   switch (node->kind) {
   case ND_VAR:
     if (node->var->is_local)
       error_tok(node->tok, "not a compile-time constant");
     *label = &node->var->name;
-    std::cout << " ND_VAR:" << **label << std::endl;
     return 0;
   case ND_DEREF:
     std::cout << " ND_DEREF" << std::endl;
@@ -2033,8 +2085,10 @@ bool is_const_initializer(Initializer *init) {
       }
     }
   }
-
-  return is_const_expr(init->expr);
+  if (init->expr) {
+    return is_const_expr(init->expr);
+  }
+  return true;
 }
 
 bool is_const_expr(Node *node) {
@@ -2472,8 +2526,9 @@ static Node *new_add(Node *lhs, Node *rhs, Token *tok) {
 
   // VLA + num
   if (lhs->ty->base->kind == TY_VLA) {
-    rhs = new_binary(ND_MUL, rhs, new_var_node(lhs->ty->base->vla_size, tok), tok);
+    rhs = new_binary(ND_MUL, rhs, lhs->ty->base->vla_len, tok);
     node = new_binary(ND_ADD, lhs, rhs, tok);
+    rhs->is_offset = true;
     add_o_kind(node);
     return node;
   }
@@ -2827,6 +2882,10 @@ static Type *struct_decl(Token **rest, Token *tok) {
       bits += mem->ty->size * 8;
     }
 
+    if (mem->is_bitfield) {
+      ty->has_bitfield = true;
+    }
+
     if (!ty->is_packed && ty->align < mem->align)
       ty->align = mem->align;
   }
@@ -2992,7 +3051,7 @@ static Node *postfix(Token **rest, Token *tok) {
       return new_var_node(var, start);
     }
 
-    Obj *var = new_lvar("", ty);
+    Obj *var = new_lvar(new_initializer_name(), ty);
     Node *lhs = lvar_initializer(rest, tok, var);
     Node *rhs = new_var_node(var, tok);
     return new_binary(ND_COMMA, lhs, rhs, start);

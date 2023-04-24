@@ -255,12 +255,87 @@ static llvm::Type *get_pointer_type(Type *ctype) {
   return type;
 }
 
-static llvm::StructType *build_struct_type(Type *ctype) {
-  llvm::StructType *type = nullptr;
+// create struct type
+static bool is_anony_tag(std::string &name) {
+  int index = name.find(".tag..");
+  return index == 0; 
+}
+
+static std::string get_tag_type_name(Token *tag) {
+  std::string tag_name = get_ident(tag);
+  return is_anony_tag(tag_name) ? "anon" : tag_name;
+}
+
+static std::string get_struct_name(Type *ctype, bool packed) {
+  llvm::SmallString<256> TypeName;
+  llvm::raw_svector_ostream OS(TypeName);
+  std::string kindName = ctypeKindString(ctype->kind);
+  OS << kindName << ".";
+  // tag
+  std::string tag_name = get_tag_type_name(ctype->tag);
+  OS << tag_name;
+  if (packed) {
+    OS << ".packed";
+  }
+  return OS.str().str();
+}
+
+static void addRecordTypeName(Type *ctype, llvm::StructType *Ty) {
+  Ty->setName(get_struct_name(ctype, false));
+}
+
+static llvm::Type *get_padding_type(int PadSize) {
+  llvm::Type *Ty = Builder->getInt8Ty();
+  if (PadSize > 1) {
+    Ty = llvm::ArrayType::get(Ty, PadSize);
+  }
+  return Ty;
+}
+
+static llvm::Type* get_padding_type(int align, int size) {
+  int padSize = align - size;
+  return padSize > 0 ? get_padding_type(padSize) : nullptr;
+}
+
+static llvm::StructType *create_struct_type(Type *ctype) {
+  // struct
+  llvm::StructType *type = llvm::StructType::create(*TheContext);
+  addRecordTypeName(ctype, type);
+  push_tag_scope(ctype, type);
   return type;
 }
+
+static llvm::StructType *build_struct_type(Type *ctype) {
+    // struct
+  bool packed = ctype->is_packed;
+  llvm::StructType *type = create_struct_type(ctype);
+
+  std::vector<llvm::Type *> Types;
+  int index = 0;
+  Member *member = ctype->members;
+  while (member) {
+    Types.push_back(create_type(member->ty));
+    member->type_idx = index++;
+    llvm::Type *paddingType = get_padding_type(member->align, member->ty->size);
+    if (paddingType) {
+      Types.push_back(paddingType);
+      index++;
+    }
+    member = member->next;
+  }
+  type->setBody(Types, packed);
+  return type;
+}
+
+static llvm::Type *get_struct_type(Type *ctype) {
+  llvm::StructType *ty = find_tag(ctype);
+  if (ty) {
+    return ty;
+  }
+  return build_struct_type(ctype);
+}
   
-static llvm::Type *get_record_type(Type *ctype) {
+static llvm::Type *get_union_type(Type *ctype) {
   llvm::StructType *ty = find_tag(ctype);
   if (ty) {
     return ty;
@@ -268,6 +343,7 @@ static llvm::Type *get_record_type(Type *ctype) {
   return build_struct_type(ctype);
 }
 
+// type emit table
 static llvm::Type *(*type_table[TY_DUMMY])(Type *ctype) = {
   [TY_VOID] = get_void_type,
   [TY_BOOL] = get_char_type,
@@ -280,8 +356,8 @@ static llvm::Type *(*type_table[TY_DUMMY])(Type *ctype) = {
   [TY_LDOUBLE] = get_long_double_type,
   [TY_ARRAY] = get_array_type,
   [TY_PTR] = get_pointer_type,
-  [TY_UNION] = get_record_type,
-  [TY_STRUCT] = get_record_type,
+  [TY_UNION] = get_union_type,
+  [TY_STRUCT] = get_struct_type,
 };
 
 static llvm::Type *create_type(Type *ty) {
