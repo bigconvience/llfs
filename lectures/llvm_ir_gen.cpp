@@ -42,6 +42,15 @@ static llvm::LLVMContext &getLLVMContext() {
 //= block scope utils
 //
 
+static char *get_ident(Token *tok) {
+  if (!tok) {
+    return "";
+  }
+  if (tok->kind != TK_IDENT)
+    error_tok(tok, "expected an identifier");
+  return strndup(tok->loc, tok->len);
+}
+
 typedef struct BlockScope {
   BlockScope *next;
 
@@ -98,6 +107,37 @@ static llvm::Value *find_var(Obj *var) {
     }
   }
   return nullptr;
+}
+
+static std::string get_tag_name(Type *ty) {
+  std::string tag_name = get_ident(ty->tag);
+  tag_name.append(".");
+  tag_name.append(std::to_string(ty->scope_level));
+  return tag_name;
+}
+
+static llvm::StructType *find_tag(std::string tag_name) {
+  for (BlockScope *sc = scope; sc; sc = sc->next) {
+    llvm::StructType *type = sc->tags[tag_name];
+    if (type) {
+      return type;
+    }
+  }
+  return nullptr;
+}
+
+static llvm::StructType *find_tag(Type *ty) {
+  std::string tag_name = get_tag_name(ty);
+  return find_tag(tag_name);
+}
+
+static void push_tag_scope(std::string tag_name, llvm::StructType *type) {
+  scope->tags[tag_name] = type;
+}
+
+static void push_tag_scope(Type *ty, llvm::StructType *type) {
+  std::string tag_name = get_tag_name(ty);
+  push_tag_scope(tag_name, type);
 }
 
 //
@@ -215,6 +255,19 @@ static llvm::Type *get_pointer_type(Type *ctype) {
   return type;
 }
 
+static llvm::StructType *build_struct_type(Type *ctype) {
+  llvm::StructType *type = nullptr;
+  return type;
+}
+  
+static llvm::Type *get_record_type(Type *ctype) {
+  llvm::StructType *ty = find_tag(ctype);
+  if (ty) {
+    return ty;
+  }
+  return build_struct_type(ctype);
+}
+
 static llvm::Type *(*type_table[TY_DUMMY])(Type *ctype) = {
   [TY_VOID] = get_void_type,
   [TY_BOOL] = get_char_type,
@@ -227,6 +280,8 @@ static llvm::Type *(*type_table[TY_DUMMY])(Type *ctype) = {
   [TY_LDOUBLE] = get_long_double_type,
   [TY_ARRAY] = get_array_type,
   [TY_PTR] = get_pointer_type,
+  [TY_UNION] = get_record_type,
+  [TY_STRUCT] = get_record_type,
 };
 
 static llvm::Type *create_type(Type *ty) {
