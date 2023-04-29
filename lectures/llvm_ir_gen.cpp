@@ -238,15 +238,14 @@ static llvm::Type *get_long_double_type(Type *ty) {
 static llvm::Type *get_array_type(Type *ctype) {
   llvm::Type *base = create_type(ctype->base);
   int array_len = ctype->array_len;
-  llvm::ArrayType *type = llvm::ArrayType::get(base, array_len);
-  return type;
+  return llvm::ArrayType::get(base, array_len);
 }
 
 static llvm::Type *get_pointer_type(Type *ctype) {
   Type *baseTy = ctype->base;
   llvm::Type *base = nullptr;
   if (baseTy->kind == TY_VOID) {
-    // (void *) to (char *)
+    // (void *) -> (char *)
     base = Builder->getInt8Ty();
   } else {
     base = create_type(baseTy);
@@ -298,7 +297,6 @@ static llvm::Type* get_padding_type(int align, int size) {
 }
 
 static llvm::StructType *create_struct_type(Type *ctype) {
-  // struct
   llvm::StructType *type = llvm::StructType::create(*TheContext);
   addRecordTypeName(ctype, type);
   push_tag_scope(ctype, type);
@@ -306,14 +304,13 @@ static llvm::StructType *create_struct_type(Type *ctype) {
 }
 
 static llvm::StructType *build_struct_type(Type *ctype) {
-    // struct
   bool packed = ctype->is_packed;
   llvm::StructType *type = create_struct_type(ctype);
 
   std::vector<llvm::Type *> Types;
   int index = 0;
   Member *member = ctype->members;
-  while (member) {
+  while(member) {
     Types.push_back(create_type(member->ty));
     member->type_idx = index++;
     llvm::Type *paddingType = get_padding_type(member->align, member->ty->size);
